@@ -61,7 +61,7 @@ func publish(c *firestore.Client, topic string) {
 			}
 		}
 
-		<-time.After(time.Millisecond * 500)
+		<-time.After(time.Millisecond * 200)
 	}
 }
 
@@ -74,37 +74,44 @@ func main() {
 
 	topic := "topic"
 
-	// logic for creating subscription if it doesn't exist
-	// should be in transaction?
-	subDocs, err := client.Collection("pubsub").
-		Doc(topic).
-		Collection("subscriptions").
-		Where("name", "==", "testowa").
-		Documents(context.Background()).
-		GetAll()
-	if err != nil {
-		panic(err)
-	}
-
-	if len(subDocs) <= 0 {
-		if _, _, err := client.Collection("pubsub").
+	// create subscription if it doesn't exist
+	transErr := client.RunTransaction(ctx, func(ctx context.Context, t *firestore.Transaction) error {
+		q := client.Collection("pubsub").
 			Doc(topic).
-			Collection("subscriptions").
-			Add(context.Background(), subscription{Name: "testowa"}); err != nil {
-			panic(err)
+			Collection("subscriptions").Query.
+			Where("name", "==", "testowa")
+
+		subDocs, err := t.Documents(q).GetAll()
+		if err != nil {
+			return err
 		}
 
+		if len(subDocs) <= 0 {
+			if err := t.Create(
+				client.Collection("pubsub").
+					Doc(topic).
+					Collection("subscriptions").NewDoc(),
+				subscription{Name: "testowa"}); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+	if transErr != nil {
+		panic(transErr)
 	}
 
 	col := client.Collection("pubsub").Doc(topic).Collection("testowa")
-	query := col.Query.Snapshots(ctx)
+	query := col.Query.
+		Snapshots(ctx)
 	defer query.Stop()
 	go publish(client, topic)
 
 	for {
 		// get update on topic
 		fmt.Println("Waiting for next update...")
-		snapshots, err := query.Next()
+		querySnapshot, err := query.Next()
 		if err == iterator.Done {
 			fmt.Println("Listening on topic done")
 			break
@@ -114,42 +121,36 @@ func main() {
 		}
 
 		fmt.Println("Update received")
-		if snapshots.Size == 0 {
+		if querySnapshot.Size == 0 {
 			fmt.Println("Zero documents in snapshot")
 			continue
 		}
+		for _, ch := range querySnapshot.Changes {
+			// handle only if document was added
+			if ch.Kind == firestore.DocumentAdded {
+				fmt.Println("documents exists", ch.Doc.Exists())
 
-		for {
-			snapshot, err := snapshots.Documents.Next()
-			if err != nil {
-				if err == iterator.Done {
-					break
-				}
-				fmt.Printf("Error reading snapshots: %v\n", err)
-				break
-			}
+				if err := client.RunTransaction(ctx, func(ctx context.Context, t *firestore.Transaction) error {
+					s, err := t.Get(ch.Doc.Ref)
+					if err != nil && status.Code(err) == codes.NotFound {
+						fmt.Println("snapshot doesn't exist")
+						return nil
+					} else if err != nil {
+						fmt.Println("error getting snapshot")
+						return err
+					}
 
-			fmt.Println("iterating over snapshots")
-			if err := client.RunTransaction(ctx, func(ctx context.Context, t *firestore.Transaction) error {
-				s, err := t.Get(snapshot.Ref)
-				if err != nil && status.Code(err) == codes.NotFound {
-					fmt.Println("snapshot doesn't exist")
-					return nil
-				} else if err != nil {
-					fmt.Println("error getting snapshot")
-					return err
-				}
-
-				// consume if still exists
-				if err := t.Delete(s.Ref, firestore.Exists); err != nil {
+					// consume if still exists
+					if err := t.Delete(s.Ref, firestore.Exists); err != nil {
+						fmt.Printf("Consumed message: %+v\n", s.Data())
+						return err
+					}
 					fmt.Printf("Consumed message: %+v\n", s.Data())
-					return err
-				}
-				fmt.Printf("Consumed message: %+v\n", s.Data())
 
-				return nil
-			}); err != nil {
-				fmt.Printf("Transaction error: %v\n", err)
+					return nil
+				}, firestore.MaxAttempts(1)); err != nil {
+					fmt.Printf("Transaction error: %v\n", err)
+				}
 			}
 		}
 	}
