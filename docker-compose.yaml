@@ -1,0 +1,12 @@
+# for Watermill development purposes.
+# For Watermill based application docker please check https://watermill.io/docs/getting-started/
+
+version: '3'
+services:
+  googlecloud:
+    image: czeslavo/firestore-emulator:latest
+    environment:
+      - FIRESTORE_PROJECT_ID=project-test
+    ports:
+      - 8080:8080
+    restart: unless-stopped
