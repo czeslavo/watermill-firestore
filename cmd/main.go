@@ -3,14 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/google/uuid"
-	"google.golang.org/api/iterator"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type firestoreMessage struct {
@@ -61,13 +57,13 @@ func publish(c *firestore.Client, topic string) {
 			}
 		}
 
-		<-time.After(time.Millisecond * 200)
+		<-time.After(time.Second * 5)
 	}
 }
 
 func main() {
 	ctx := context.Background()
-	client, err := firestore.NewClient(ctx, os.Getenv("FIRESTORE_PROJECT_ID"))
+	client, err := firestore.NewClient(ctx, "test")
 	if err != nil {
 		panic(err)
 	}
@@ -106,53 +102,53 @@ func main() {
 	query := col.Query.
 		Snapshots(ctx)
 	defer query.Stop()
-	go publish(client, topic)
+	publish(client, topic)
 
-	for {
-		// get update on topic
-		fmt.Println("Waiting for next update...")
-		querySnapshot, err := query.Next()
-		if err == iterator.Done {
-			fmt.Println("Listening on topic done")
-			break
-		} else if err != nil {
-			fmt.Printf("Error listening on topic: %v\n", err)
-			break
-		}
+	// for {
+	// 	// get update on topic
+	// 	fmt.Println("Waiting for next update...")
+	// 	querySnapshot, err := query.Next()
+	// 	if err == iterator.Done {
+	// 		fmt.Println("Listening on topic done")
+	// 		break
+	// 	} else if err != nil {
+	// 		fmt.Printf("Error listening on topic: %v\n", err)
+	// 		break
+	// 	}
 
-		fmt.Println("Update received")
-		if querySnapshot.Size == 0 {
-			fmt.Println("Zero documents in snapshot")
-			continue
-		}
-		for _, ch := range querySnapshot.Changes {
-			// handle only if document was added
-			if ch.Kind == firestore.DocumentAdded {
-				fmt.Println("documents exists", ch.Doc.Exists())
+	// 	fmt.Println("Update received")
+	// 	if querySnapshot.Size == 0 {
+	// 		fmt.Println("Zero documents in snapshot")
+	// 		continue
+	// 	}
+	// 	for _, ch := range querySnapshot.Changes {
+	// 		// handle only if document was added
+	// 		if ch.Kind == firestore.DocumentAdded {
+	// 			fmt.Println("documents exists", ch.Doc.Exists())
 
-				if err := client.RunTransaction(ctx, func(ctx context.Context, t *firestore.Transaction) error {
-					s, err := t.Get(ch.Doc.Ref)
-					if err != nil && status.Code(err) == codes.NotFound {
-						fmt.Println("snapshot doesn't exist")
-						return nil
-					} else if err != nil {
-						fmt.Println("error getting snapshot")
-						return err
-					}
+	// 			if err := client.RunTransaction(ctx, func(ctx context.Context, t *firestore.Transaction) error {
+	// 				s, err := t.Get(ch.Doc.Ref)
+	// 				if err != nil && status.Code(err) == codes.NotFound {
+	// 					fmt.Println("snapshot doesn't exist")
+	// 					return nil
+	// 				} else if err != nil {
+	// 					fmt.Println("error getting snapshot")
+	// 					return err
+	// 				}
 
-					// consume if still exists
-					if err := t.Delete(s.Ref, firestore.Exists); err != nil {
-						fmt.Printf("Consumed message: %+v\n", s.Data())
-						return err
-					}
-					fmt.Printf("Consumed message: %+v\n", s.Data())
+	// 				// consume if still exists
+	// 				if err := t.Delete(s.Ref, firestore.Exists); err != nil {
+	// 					fmt.Printf("Consumed message: %+v\n", s.Data())
+	// 					return err
+	// 				}
+	// 				fmt.Printf("Consumed message: %+v\n", s.Data())
 
-					return nil
-				}, firestore.MaxAttempts(1)); err != nil {
-					fmt.Printf("Transaction error: %v\n", err)
-				}
-			}
-		}
-	}
+	// 				return nil
+	// 			}, firestore.MaxAttempts(1)); err != nil {
+	// 				fmt.Printf("Transaction error: %v\n", err)
+	// 			}
+	// 		}
+	// 	}
+	// }
 
 }
