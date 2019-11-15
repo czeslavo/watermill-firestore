@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
@@ -34,7 +33,7 @@ func main() {
 }
 
 func read(output <-chan *message.Message) {
-	for m := range output {
-		fmt.Println("Received", m)
+	for _ = range output {
+		// fmt.Println("Received", m)
 	}
 }

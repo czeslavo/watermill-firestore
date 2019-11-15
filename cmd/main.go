@@ -10,8 +10,9 @@ import (
 )
 
 type firestoreMessage struct {
-	UUID    string `firestore:"uuid"`
-	Payload []byte `firestore:"payload"`
+	UUID     string                 `firestore:"uuid"`
+	Metadata map[string]interface{} `firestore:"metadata"`
+	Payload  []byte                 `firestore:"payload"`
 }
 
 type subscription struct {
@@ -57,7 +58,7 @@ func publish(c *firestore.Client, topic string) {
 			}
 		}
 
-		<-time.After(time.Second * 5)
+		<-time.After(time.Millisecond * 500)
 	}
 }
 

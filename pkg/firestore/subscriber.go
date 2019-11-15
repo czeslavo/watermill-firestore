@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -12,8 +11,6 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"google.golang.org/api/iterator"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type SubscriberConfig struct {
@@ -166,39 +163,39 @@ func onlyAddedEvents(changes []firestore.DocumentChange) (added []firestore.Docu
 
 func (s *subscription) handleAddedEvents(added []firestore.DocumentChange) {
 	for _, e := range added {
-		s.handleAddedEvent(e.Doc.Ref)
+		s.handleAddedEvent(e.Doc)
 	}
 }
 
-func (s *subscription) handleAddedEvent(doc *firestore.DocumentRef) {
+type firestoreMessage struct {
+	UUID     string                 `firestore:"uuid"`
+	Metadata map[string]interface{} `firestore:"metadata"`
+	Payload  []byte                 `firestore:"payload"`
+}
+
+func (s *subscription) handleAddedEvent(doc *firestore.DocumentSnapshot) {
 	ctx := context.Background()
 
-	if err := s.client.RunTransaction(ctx, func(ctx context.Context, t *firestore.Transaction) error {
-		d, err := t.Get(doc)
-		if err != nil && status.Code(err) == codes.NotFound {
-			fmt.Println("snapshot doesn't exist")
-			return nil
-		} else if err != nil {
-			fmt.Println("error getting snapshot")
-			return err
-		}
-
-		// consume if still exists
-		if err := t.Delete(d.Ref, firestore.Exists); err != nil {
-			s.logger.Error("deleting failed", err, watermill.LogFields{})
-		}
-
-		payload, err := json.Marshal(d.Data())
-		if err != nil {
-			panic(err)
-		}
-		s.output <- message.NewMessage("uuid", payload)
-
-		return nil
-	}, firestore.MaxAttempts(1)); err != nil {
-		fmt.Printf("Transaction error: %v\n", err)
+	// delete with precondition that the document exists
+	// when the precondition fails, it returns error
+	_, err := doc.Ref.Delete(ctx, firestore.Exists)
+	if err != nil {
+		// we shouldn't handle this message since it was already handleded by someone
+		s.logger.Info("deleting failed", watermill.LogFields{"error": err})
+		return
 	}
 
+	msg := firestoreMessage{}
+	if err := doc.DataTo(&msg); err != nil {
+		panic(err)
+	}
+	s.logger.Info("Handling", watermill.LogFields{"uuid": msg.UUID})
+
+	payload, err := json.Marshal(doc.Data()["uuid"])
+	if err != nil {
+		panic(err)
+	}
+	s.output <- message.NewMessage("uuid", payload)
 }
 
 func (p *Subscriber) Close() error {
