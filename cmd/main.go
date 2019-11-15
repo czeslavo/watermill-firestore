@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -51,6 +52,7 @@ func publish(c *firestore.Client, topic string) {
 
 			_, _, err = subCol.Add(context.Background(), firestoreMessage{
 				uuid.Must(uuid.NewUUID()).String(),
+				nil,
 				[]byte("testowy-message"),
 			})
 			if err != nil {
@@ -58,13 +60,13 @@ func publish(c *firestore.Client, topic string) {
 			}
 		}
 
-		<-time.After(time.Millisecond * 500)
+		<-time.After(time.Millisecond * 10)
 	}
 }
 
 func main() {
 	ctx := context.Background()
-	client, err := firestore.NewClient(ctx, "test")
+	client, err := firestore.NewClient(ctx, os.Getenv("FIRESTORE_PROJECT_ID"))
 	if err != nil {
 		panic(err)
 	}

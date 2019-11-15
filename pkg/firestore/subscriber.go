@@ -2,7 +2,6 @@ package firestore
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"time"
@@ -181,21 +180,17 @@ func (s *subscription) handleAddedEvent(doc *firestore.DocumentSnapshot) {
 	_, err := doc.Ref.Delete(ctx, firestore.Exists)
 	if err != nil {
 		// we shouldn't handle this message since it was already handleded by someone
-		s.logger.Info("deleting failed", watermill.LogFields{"error": err})
 		return
 	}
 
-	msg := firestoreMessage{}
-	if err := doc.DataTo(&msg); err != nil {
+	fsMsg := firestoreMessage{}
+	if err := doc.DataTo(&fsMsg); err != nil {
 		panic(err)
 	}
-	s.logger.Info("Handling", watermill.LogFields{"uuid": msg.UUID})
 
-	payload, err := json.Marshal(doc.Data()["uuid"])
-	if err != nil {
-		panic(err)
-	}
-	s.output <- message.NewMessage("uuid", payload)
+	msg := message.NewMessage(fsMsg.UUID, fsMsg.Payload)
+	s.output <- msg
+
 }
 
 func (p *Subscriber) Close() error {

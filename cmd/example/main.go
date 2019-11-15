@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"time"
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
@@ -16,7 +19,7 @@ func main() {
 			GenerateSubscriptionName: func(topic string) string {
 				return topic + "_sub"
 			},
-			ProjectID: "test",
+			ProjectID: os.Getenv("FIRESTORE_PROJECT_ID"),
 		},
 		logger,
 	)
@@ -33,7 +36,10 @@ func main() {
 }
 
 func read(output <-chan *message.Message) {
+	t0 := time.Now()
 	for _ = range output {
-		// fmt.Println("Received", m)
+		t1 := time.Now()
+		fmt.Printf("%f/sec\n", 1./t1.Sub(t0).Seconds())
+		t0 = t1
 	}
 }
