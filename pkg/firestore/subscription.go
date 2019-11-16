@@ -128,9 +128,14 @@ func (s *subscription) handleAddedEvent(ctx context.Context, doc *firestore.Docu
 	for k, v := range fsMsg.Metadata {
 		msg.Metadata.Set(k, v.(string))
 	}
+	ctx, cancelCtx := context.WithCancel(ctx)
+	msg.SetContext(ctx)
+	defer cancelCtx()
+
 	select {
 	case <-ctx.Done():
 		republish()
+		return
 	case s.output <- msg:
 		// message consumed, wait for ack/nack
 	}

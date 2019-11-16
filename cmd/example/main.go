@@ -39,8 +39,30 @@ func main() {
 	go read(output1)
 	go read(output2)
 
+	publisher, err := firestore.NewPublisher(
+		firestore.PublisherConfig{
+			ProjectID: os.Getenv("FIRESTORE_PROJECT_ID"),
+		},
+		logger,
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	go publish(publisher)
+
 	<-time.After(time.Second * 20)
 	subscriber.Close()
+}
+
+func publish(p *firestore.Publisher) {
+	for {
+		err := p.Publish("topic", message.NewMessage(watermill.NewShortUUID(), []byte("test")))
+		if err != nil {
+			panic(err)
+		}
+		<-time.After(time.Second)
+	}
 }
 
 func read(output <-chan *message.Message) {

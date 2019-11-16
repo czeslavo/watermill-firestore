@@ -15,7 +15,7 @@ func createPubSub(t *testing.T) (message.Publisher, message.Subscriber) {
 	return createPubSubWithSubscriptionName(t, "topic")
 }
 
-func createPubSubWithSubscriptionName(t *testing.T, topic string) (message.Publisher, message.Subscriber) {
+func createPubSubWithSubscriptionName(t *testing.T, subscriptionName string) (message.Publisher, message.Subscriber) {
 	logger := watermill.NewStdLogger(true, false)
 
 	pub, err := firestore.NewPublisher(
@@ -31,7 +31,7 @@ func createPubSubWithSubscriptionName(t *testing.T, topic string) (message.Publi
 	sub, err := firestore.NewSubscriber(
 		firestore.SubscriberConfig{
 			GenerateSubscriptionName: func(topic string) string {
-				return topic + "_sub"
+				return topic + subscriptionName
 			},
 			ProjectID: os.Getenv("FIRESTORE_PROJECT_ID"),
 		},

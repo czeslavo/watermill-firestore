@@ -98,3 +98,18 @@ func (s *Subscriber) Close() error {
 	s.allSubscriptionsWaitingGroup.Wait()
 	return nil
 }
+
+func (s *Subscriber) SubscribeInitialize(topic string) error {
+	ctx := context.Background()
+	_, err := s.client.Collection("pubsub").
+		Doc(topic).
+		Collection("subscriptions").
+		Doc(s.config.GenerateSubscriptionName(topic)).Create(ctx, firestoreSubscription{Name: topic})
+	if err != nil {
+		s.logger.Debug("Error creatign subscription (possibly already exist", watermill.LogFields{})
+		return nil
+	}
+
+	s.logger.Info("Created subscription", watermill.LogFields{})
+	return nil
+}
