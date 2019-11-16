@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"time"
 
@@ -12,7 +11,7 @@ import (
 )
 
 func main() {
-	logger := watermill.NewStdLogger(false, false)
+	logger := watermill.NewStdLogger(true, false)
 
 	subscriber, err := firestore.NewSubscriber(
 		firestore.SubscriberConfig{
@@ -27,19 +26,31 @@ func main() {
 		panic(err)
 	}
 
-	output, err := subscriber.Subscribe(context.Background(), "topic")
+	output1, err := subscriber.Subscribe(context.Background(), "topic")
 	if err != nil {
 		panic(err)
 	}
 
-	read(output)
+	output2, err := subscriber.Subscribe(context.Background(), "topic")
+	if err != nil {
+		panic(err)
+	}
+
+	go read(output1)
+	go read(output2)
+
+	<-time.After(time.Second * 20)
+	subscriber.Close()
 }
 
 func read(output <-chan *message.Message) {
-	t0 := time.Now()
-	for _ = range output {
-		t1 := time.Now()
-		fmt.Printf("%f/sec\n", 1./t1.Sub(t0).Seconds())
-		t0 = t1
+	for {
+		select {
+		case msg := <-output:
+			if msg == nil {
+				return
+			}
+			msg.Ack()
+		}
 	}
 }

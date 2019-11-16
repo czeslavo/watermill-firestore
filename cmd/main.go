@@ -60,7 +60,7 @@ func publish(c *firestore.Client, topic string) {
 			}
 		}
 
-		<-time.After(time.Millisecond * 10)
+		<-time.After(time.Second * 10)
 	}
 }
 
