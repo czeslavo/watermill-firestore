@@ -34,9 +34,9 @@ func newSubscription(client *firestore.Client, logger watermill.LoggerAdapter, n
 		output: make(chan *message.Message),
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel()
-	if err := s.createFirestoreSubIfNotExist(ctx, name, topic); err != nil {
+	// ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	// defer cancel()
+	if err := s.createFirestoreSubIfNotExist(context.Background(), name, topic); err != nil {
 		return nil, err
 	}
 
@@ -44,34 +44,18 @@ func newSubscription(client *firestore.Client, logger watermill.LoggerAdapter, n
 }
 
 func (s *subscription) createFirestoreSubIfNotExist(ctx context.Context, name, topic string) error {
-	return s.client.RunTransaction(ctx, func(ctx context.Context, t *firestore.Transaction) error {
-		q := s.client.
-			Collection("pubsub").
-			Doc(topic).
-			Collection("subscriptions").Query.
-			Where("name", "==", name)
 
-		subDocs, err := t.Documents(q).GetAll()
-		if err != nil {
-			return err
-		}
-
-		if len(subDocs) <= 0 {
-			s.logger.Info("Creating subscription", watermill.LogFields{})
-			if err := t.Create(
-				s.client.Collection("pubsub").
-					Doc(topic).
-					Collection("subscriptions").
-					NewDoc(),
-				firestoreSubscription{Name: name}); err != nil {
-				return err
-			}
-		} else {
-			s.logger.Info("Subscription already exists", watermill.LogFields{})
-		}
-
+	_, err := s.client.Collection("pubsub").
+		Doc(topic).
+		Collection("subscriptions").
+		Doc(name).Create(ctx, firestoreSubscription{Name: name})
+	if err != nil {
+		s.logger.Debug("Error creatign subscription (possibly already exist", watermill.LogFields{})
 		return nil
-	})
+	}
+
+	s.logger.Info("Created subscription", watermill.LogFields{})
+	return nil
 }
 
 func (s *subscription) receive(ctx context.Context) {
@@ -141,6 +125,9 @@ func (s *subscription) handleAddedEvent(ctx context.Context, doc *firestore.Docu
 	}
 
 	msg := message.NewMessage(fsMsg.UUID, fsMsg.Payload)
+	for k, v := range fsMsg.Metadata {
+		msg.Metadata.Set(k, v.(string))
+	}
 	select {
 	case <-ctx.Done():
 		republish()

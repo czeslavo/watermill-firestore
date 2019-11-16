@@ -1,8 +1,10 @@
 package firestore_test
 
 import (
+	"os"
 	"testing"
 
+	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/pubsub/tests"
 
@@ -14,15 +16,30 @@ func createPubSub(t *testing.T) (message.Publisher, message.Subscriber) {
 }
 
 func createPubSubWithSubscriptionName(t *testing.T, topic string) (message.Publisher, message.Subscriber) {
-	pub, err := firestore.NewPublisher()
-	if err != nil {
-		t.Fatal(err)
-	}
-	sub, err := firestore.NewSubscriber()
+	logger := watermill.NewStdLogger(true, false)
+
+	pub, err := firestore.NewPublisher(
+		firestore.PublisherConfig{
+			ProjectID: os.Getenv("FIRESTORE_PROJECT_ID"),
+		},
+		logger,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	sub, err := firestore.NewSubscriber(
+		firestore.SubscriberConfig{
+			GenerateSubscriptionName: func(topic string) string {
+				return topic + "_sub"
+			},
+			ProjectID: os.Getenv("FIRESTORE_PROJECT_ID"),
+		},
+		logger,
+	)
+	if err != nil {
+		panic(err)
+	}
 	return pub, sub
 }
 

@@ -63,7 +63,7 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 
 	sub, err := newSubscription(s.client, s.logger, subscriptionName, topic)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	receiveFinished := make(chan struct{})
@@ -88,6 +88,10 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 }
 
 func (s *Subscriber) Close() error {
+	if s.closed {
+		return nil
+	}
+
 	s.closed = true
 	close(s.closing)
 
