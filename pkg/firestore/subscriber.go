@@ -38,11 +38,11 @@ func NewSubscriber(config SubscriberConfig, logger watermill.LoggerAdapter) (*Su
 	}
 
 	return &Subscriber{
-		closed: false,
+		closed:  false,
 		closing: make(chan struct{}),
-		client: client,
-		config: config,
-		logger: logger,
+		client:  client,
+		config:  config,
+		logger:  logger,
 	}, nil
 }
 
@@ -86,8 +86,6 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 
 	return sub.output, nil
 }
-
-
 
 func (s *Subscriber) Close() error {
 	s.closed = true

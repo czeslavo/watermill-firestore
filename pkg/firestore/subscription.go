@@ -159,5 +159,4 @@ func (s *subscription) handleAddedEvent(ctx context.Context, doc *firestore.Docu
 		s.logger.Debug("Context done, republishing", watermill.LogFields{})
 		republish()
 	}
-
 }

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	fs "cloud.google.com/go/firestore"
-	"github.com/stretchr/testify/require"
 	"github.com/ThreeDotsLabs/watermill"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSubscription(t *testing.T) {
@@ -26,38 +26,36 @@ func TestSubscription(t *testing.T) {
 	s, err := newSubscription(client, logger, "subName", "topicName")
 	require.NoError(t, err)
 
-
 	go func() {
-		 s.receive(ctx)
+		s.receive(ctx)
 	}()
 
-	msg := <- s.output
+	msg := <-s.output
 	require.NotNil(t, msg)
 
 	_, _, err = client.Collection("pubsub").Doc("topicName").Collection("subName").Add(ctx, firestoreMessage{})
 	require.NoError(t, err)
 
 	select {
-	case <- s.output:
+	case <-s.output:
 		t.Fail()
-	case <- time.After(time.Second * 2):
+	case <-time.After(time.Second * 2):
 		// cannot receive message if the recent one hasn't been acked/nacked
 	}
 
 	msg.Ack()
 
 	select {
-	case msg := <- s.output:
+	case msg := <-s.output:
 		require.NotNil(t, msg)
 		msg.Nack()
-	case <- time.After(time.Second * 2):
+	case <-time.After(time.Second * 2):
 		t.Fail()
 	}
 
 	// message nacked
 	// should sent back to firestore
 
-	msg = <- s.output
+	msg = <-s.output
 	require.NotNil(t, msg)
 }
-
