@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/ThreeDotsLabs/watermill"
@@ -29,10 +28,7 @@ type Subscriber struct {
 }
 
 func NewSubscriber(config SubscriberConfig, logger watermill.LoggerAdapter) (*Subscriber, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel()
-
-	client, err := firestore.NewClient(ctx, config.ProjectID)
+	client, err := firestore.NewClient(context.Background(), config.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -96,6 +92,12 @@ func (s *Subscriber) Close() error {
 	close(s.closing)
 
 	s.allSubscriptionsWaitingGroup.Wait()
+
+	if err := s.client.Close(); err != nil {
+		s.logger.Error("failed closing firebase client", err, watermill.LogFields{})
+		return err
+	}
+
 	return nil
 }
 

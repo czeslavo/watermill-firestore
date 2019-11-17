@@ -2,11 +2,13 @@ package firestore
 
 import (
 	"context"
-	"fmt"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type PublisherConfig struct {
@@ -51,9 +53,11 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 		for _, sub := range subscriptions {
 			subCol := p.client.Collection("pubsub").Doc(topic).Collection(sub.Ref.ID)
 
-			_, _, err = subCol.Add(context.Background(), firestoreMsg)
+			ctx, _ := context.WithTimeout(context.Background(), time.Second*10)
+			_, _, err = subCol.Add(ctx, firestoreMsg)
 			if err != nil {
-				fmt.Printf("Error adding doc: %v\n", err)
+				p.logger.Error("failed to send msg", err, watermill.LogFields{})
+				return err
 			}
 		}
 	}
@@ -62,5 +66,15 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 }
 
 func (p *Publisher) Close() error {
+	if err := p.client.Close(); err != nil {
+		if status.Code(err) == codes.Canceled {
+			// client is already closed
+			return nil
+		}
+
+		p.logger.Error("closing client failed", err, watermill.LogFields{})
+		return err
+	}
+
 	return nil
 }

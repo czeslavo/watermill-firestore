@@ -120,7 +120,7 @@ func (s *subscription) handleAddedEvent(ctx context.Context, doc *firestore.Docu
 		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
 		_, err = doc.Ref.Create(ctx, doc.Data())
 		if err != nil {
-			panic(err)
+			s.logger.Error("error republishing message", err, watermill.LogFields{})
 		}
 	}
 
