@@ -2,7 +2,6 @@ package firestore
 
 import (
 	"context"
-	"time"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
@@ -50,33 +49,53 @@ func (s *subscription) createFirestoreSubIfNotExist(ctx context.Context, name, t
 		Collection("subscriptions").
 		Doc(name).Create(ctx, firestoreSubscription{Name: name})
 	if err != nil {
-		s.logger.Debug("Error creatign subscription (possibly already exist", watermill.LogFields{})
+		s.logger.Debug("Error creating subscription (possibly already exist)", nil)
 		return nil
 	}
 
-	s.logger.Info("Created subscription", watermill.LogFields{})
+	s.logger.Info("Created subscription", nil)
 	return nil
 }
 
+func (s *subscription) messagesQuery() *firestore.CollectionRef {
+	return s.client.Collection("pubsub").Doc(s.topic).Collection(s.name)
+}
+
 func (s *subscription) receive(ctx context.Context) {
-	subscriptionSnapshots := s.client.
-		Collection("pubsub").
-		Doc(s.topic).
-		Collection(s.name).
-		Query.
-		Snapshots(ctx)
+	docs := s.messagesQuery().Documents(ctx)
+
+	logger := s.logger.With(watermill.LogFields{"topic": s.topic, "collection": s.name})
+	logger.Debug("Reading messages with iterator", nil)
+
+	for {
+		doc, err := docs.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			logger.Error("Failed to get event from iterator", err, nil)
+			break
+		}
+
+		logger.Trace("Handling doc from iterator", nil)
+		s.handleAddedEvent(ctx, doc, logger)
+	}
+
+	logger.Debug("Reading messages from sub", nil)
+
+	subscriptionSnapshots := s.messagesQuery().Query.Snapshots(ctx)
 	defer subscriptionSnapshots.Stop()
 
 	for {
 		subscriptionSnapshot, err := subscriptionSnapshots.Next()
 		if err == iterator.Done {
-			s.logger.Debug("Listening on subscription done", watermill.LogFields{})
+			logger.Debug("Listening on subscription done", nil)
 			break
 		} else if status.Code(err) == codes.Canceled {
-			s.logger.Debug("Receive context canceled", watermill.LogFields{})
+			logger.Debug("Receive context canceled", nil)
 			break
 		} else if err != nil {
-			s.logger.Error("Error receiving", err, watermill.LogFields{})
+			logger.Error("Error receiving", err, nil)
 			break
 		}
 
@@ -85,7 +104,7 @@ func (s *subscription) receive(ctx context.Context) {
 		}
 
 		for _, e := range onlyAddedEvents(subscriptionSnapshot.Changes) {
-			s.handleAddedEvent(ctx, e.Doc)
+			s.handleAddedEvent(ctx, e.Doc, logger)
 		}
 	}
 }
@@ -99,30 +118,13 @@ func onlyAddedEvents(changes []firestore.DocumentChange) (added []firestore.Docu
 	return
 }
 
-func (s *subscription) handleAddedEvent(ctx context.Context, doc *firestore.DocumentSnapshot) {
-	// delete with precondition that the document exists
-	// when the precondition fails, it returns error
-	// todo: should we update only to mark that we're processing it and
-	// avoid lost messages in case of error/power outage during processing?
-	_, err := doc.Ref.Delete(ctx, firestore.Exists)
-	if err != nil {
-		s.logger.Debug("Message deleted meanwhile, skipping", watermill.LogFields{})
-		// we shouldn't handle this message since it was already handled by someone
-		return
-	}
-
-	fsMsg := firestoreMessage{}
+func (s *subscription) handleAddedEvent(ctx context.Context, doc *firestore.DocumentSnapshot, logger watermill.LoggerAdapter) {
+	fsMsg := Message{}
 	if err := doc.DataTo(&fsMsg); err != nil {
 		panic(err)
 	}
 
-	republish := func() {
-		ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
-		_, err = doc.Ref.Create(ctx, doc.Data())
-		if err != nil {
-			s.logger.Error("error republishing message", err, watermill.LogFields{})
-		}
-	}
+	logger = logger.With(watermill.LogFields{"message_uuid": fsMsg.UUID})
 
 	msg := message.NewMessage(fsMsg.UUID, fsMsg.Payload)
 	for k, v := range fsMsg.Metadata {
@@ -134,7 +136,6 @@ func (s *subscription) handleAddedEvent(ctx context.Context, doc *firestore.Docu
 
 	select {
 	case <-ctx.Done():
-		republish()
 		return
 	case s.output <- msg:
 		// message consumed, wait for ack/nack
@@ -142,13 +143,16 @@ func (s *subscription) handleAddedEvent(ctx context.Context, doc *firestore.Docu
 
 	select {
 	case <-msg.Acked():
-		s.logger.Debug("Message acked", watermill.LogFields{})
-		return
+		_, err := doc.Ref.Delete(ctx, firestore.Exists)
+		if err != nil {
+			// todo - should we check err type?
+			logger.Debug("Message deleted meanwhile", nil)
+			return
+		}
+		logger.Debug("Message acked", nil)
 	case <-msg.Nacked():
-		s.logger.Debug("Message nacked, republishing", watermill.LogFields{})
-		republish()
+		logger.Debug("Message nacked", nil)
 	case <-ctx.Done():
-		s.logger.Debug("Context done, republishing", watermill.LogFields{})
-		republish()
+		logger.Debug("Context done", nil)
 	}
 }

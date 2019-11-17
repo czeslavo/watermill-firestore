@@ -38,27 +38,35 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 		return err
 	}
 
-	p.logger.Debug("Publishing", watermill.LogFields{"subscriptions_count": len(subscriptions), "topic": topic})
+	logger := p.logger.With(watermill.LogFields{"subscriptions_count": len(subscriptions), "topic": topic})
 
-	for _, message := range messages {
-		firestoreMsg := firestoreMessage{
-			UUID:     message.UUID,
-			Payload:  message.Payload,
+	logger.Debug("Publishing", nil)
+
+	for _, msg := range messages {
+		firestoreMsg := Message{
+			UUID:     msg.UUID,
+			Payload:  msg.Payload,
 			Metadata: make(map[string]interface{}),
 		}
-		for k, v := range message.Metadata {
+		for k, v := range msg.Metadata {
 			firestoreMsg.Metadata[k] = v
 		}
 
+		logger := logger.With(watermill.LogFields{"message_uuid": msg.UUID})
+
 		for _, sub := range subscriptions {
+			logger := logger.With(watermill.LogFields{"collection": sub.Ref.ID})
+
 			subCol := p.client.Collection("pubsub").Doc(topic).Collection(sub.Ref.ID)
 
 			ctx, _ := context.WithTimeout(context.Background(), time.Second*10)
 			_, _, err = subCol.Add(ctx, firestoreMsg)
 			if err != nil {
-				p.logger.Error("failed to send msg", err, watermill.LogFields{})
+				p.logger.Error("Failed to send msg", err, watermill.LogFields{})
 				return err
 			}
+
+			logger.Debug("Published message", nil)
 		}
 	}
 

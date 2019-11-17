@@ -5,7 +5,7 @@ go 1.12
 require (
 	cloud.google.com/go v0.45.1
 	cloud.google.com/go/pubsub v1.0.1 // indirect
-	github.com/ThreeDotsLabs/watermill v1.0.1
+	github.com/ThreeDotsLabs/watermill v1.0.2
 	github.com/ThreeDotsLabs/watermill-googlecloud v1.0.2 // indirect
 	github.com/google/uuid v1.1.1
 	github.com/ianlancetaylor/demangle v0.0.0-20181102032728-5e5cf60278f6 // indirect
