@@ -18,7 +18,7 @@ func TestSubscription(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, _, err = client.Collection("pubsub").Doc("topicName").Collection("subName").Add(ctx, firestoreMessage{})
+	_, _, err = client.Collection("pubsub").Doc("topicName").Collection("subName").Add(ctx, Message{})
 	require.NoError(t, err)
 
 	logger := watermill.NewStdLogger(true, true)
@@ -33,7 +33,7 @@ func TestSubscription(t *testing.T) {
 	msg := <-s.output
 	require.NotNil(t, msg)
 
-	_, _, err = client.Collection("pubsub").Doc("topicName").Collection("subName").Add(ctx, firestoreMessage{})
+	_, _, err = client.Collection("pubsub").Doc("topicName").Collection("subName").Add(ctx, Message{})
 	require.NoError(t, err)
 
 	select {
