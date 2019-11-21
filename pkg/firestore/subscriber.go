@@ -8,6 +8,8 @@ import (
 	"cloud.google.com/go/firestore"
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type SubscriberConfig struct {
@@ -50,17 +52,18 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 	ctx, cancel := context.WithCancel(ctx)
 
 	subscriptionName := s.config.GenerateSubscriptionName(topic)
-	logFields := watermill.LogFields{
+	logger := s.logger.With(watermill.LogFields{
 		"provider":          "firestore",
 		"topic":             topic,
 		"subscription_name": subscriptionName,
-	}
-	s.logger.Info("Subscribing to Firestore topic", logFields)
+	})
 
-	sub, err := newSubscription(s.client, s.logger, subscriptionName, topic)
+	sub, err := newSubscription(s.client, logger, subscriptionName, topic)
 	if err != nil {
 		return nil, err
 	}
+
+	logger.Info("Subscribed to topic", nil)
 
 	receiveFinished := make(chan struct{})
 	s.allSubscriptionsWaitingGroup.Add(1)
@@ -107,11 +110,12 @@ func (s *Subscriber) SubscribeInitialize(topic string) error {
 		Doc(topic).
 		Collection("subscriptions").
 		Doc(s.config.GenerateSubscriptionName(topic)).Create(ctx, firestoreSubscription{Name: topic})
-	if err != nil {
-		s.logger.Debug("Error creatign subscription (possibly already exist", watermill.LogFields{})
+	if status.Code(err) == codes.AlreadyExists {
 		return nil
+	} else if err != nil {
+		return err
 	}
 
-	s.logger.Info("Created subscription", watermill.LogFields{})
+	s.logger.Info("Created subscription", nil)
 	return nil
 }

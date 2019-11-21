@@ -43,7 +43,6 @@ func newSubscription(client *firestore.Client, logger watermill.LoggerAdapter, n
 }
 
 func (s *subscription) createFirestoreSubIfNotExist(ctx context.Context, name, topic string) error {
-
 	_, err := s.client.Collection("pubsub").
 		Doc(topic).
 		Collection("subscriptions").
@@ -145,7 +144,6 @@ func (s *subscription) handleAddedEvent(ctx context.Context, doc *firestore.Docu
 	case <-msg.Acked():
 		_, err := doc.Ref.Delete(ctx, firestore.Exists)
 		if err != nil {
-			// todo - should we check err type?
 			logger.Debug("Message deleted meanwhile", nil)
 			return
 		}
