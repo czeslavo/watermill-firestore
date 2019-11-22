@@ -24,7 +24,8 @@ func TestSubscription(t *testing.T) {
 
 	logger := watermill.NewStdLogger(true, true)
 
-	s, err := newSubscription(client, logger, "subName", "topicName")
+	closing := make(chan struct{})
+	s, err := newSubscription(client, logger, "subName", "topicName", closing)
 	require.NoError(t, err)
 
 	go func() {

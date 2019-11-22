@@ -3,10 +3,11 @@
 
 version: '3'
 services:
-  googlecloud:
-    image: czeslavo/firestore-emulator:latest
-    environment:
-      - FIRESTORE_PROJECT_ID=project-test
+  firestore:
+    build:
+      context: ./emulator
+    env_file:
+      - "./.env"
     ports:
       - 8080:8080
     restart: unless-stopped

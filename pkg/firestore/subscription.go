@@ -2,6 +2,7 @@ package firestore
 
 import (
 	"context"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
@@ -18,24 +19,26 @@ type subscription struct {
 	logger watermill.LoggerAdapter
 	client *firestore.Client
 
-	output chan *message.Message
+	closing chan struct{}
+	output  chan *message.Message
 }
 type firestoreSubscription struct {
 	Name string `firestore:"name"`
 }
 
-func newSubscription(client *firestore.Client, logger watermill.LoggerAdapter, name, topic string) (*subscription, error) {
+func newSubscription(client *firestore.Client, logger watermill.LoggerAdapter, name, topic string, closing chan struct{}) (*subscription, error) {
 	s := &subscription{
-		name:   name,
-		topic:  topic,
-		logger: logger,
-		client: client,
-		output: make(chan *message.Message),
+		name:    name,
+		topic:   topic,
+		logger:  logger,
+		client:  client,
+		output:  make(chan *message.Message),
+		closing: closing,
 	}
 
-	// ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	// defer cancel()
-	if err := s.createFirestoreSubIfNotExist(context.Background(), name, topic); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+	if err := s.createFirestoreSubIfNotExist(ctx, name, topic); err != nil {
 		return nil, err
 	}
 
@@ -45,7 +48,7 @@ func newSubscription(client *firestore.Client, logger watermill.LoggerAdapter, n
 func (s *subscription) createFirestoreSubIfNotExist(ctx context.Context, name, topic string) error {
 	_, err := s.client.Collection("pubsub").
 		Doc(topic).
-		Collection("subscriptions").
+		Collection(subscriptionsCollection).
 		Doc(name).Create(ctx, firestoreSubscription{Name: name})
 	if err != nil {
 		s.logger.Debug("Error creating subscription (possibly already exist)", nil)
@@ -61,22 +64,14 @@ func (s *subscription) messagesQuery() *firestore.CollectionRef {
 }
 
 func (s *subscription) receive(ctx context.Context) {
-	docs := s.messagesQuery().Documents(ctx)
-
 	logger := s.logger.With(watermill.LogFields{"topic": s.topic, "collection": s.name})
-	logger.Debug("Reading messages with iterator", nil)
 
-	for {
-		doc, err := docs.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			logger.Error("Failed to get event from iterator", err, nil)
-			break
-		}
-
-		logger.Trace("Handling doc from iterator", nil)
+	logger.Debug("Reading messages on receive start", nil)
+	docs, err := s.messagesQuery().Limit(100).Documents(ctx).GetAll()
+	if err != nil {
+		logger.Error("Couldn't read messages on receive start", err, nil)
+	}
+	for _, doc := range docs {
 		s.handleAddedEvent(ctx, doc, logger)
 	}
 
@@ -118,9 +113,12 @@ func onlyAddedEvents(changes []firestore.DocumentChange) (added []firestore.Docu
 }
 
 func (s *subscription) handleAddedEvent(ctx context.Context, doc *firestore.DocumentSnapshot, logger watermill.LoggerAdapter) {
+	logger = logger.With(watermill.LogFields{"document_id": doc.Ref.ID})
+
 	fsMsg := Message{}
 	if err := doc.DataTo(&fsMsg); err != nil {
-		panic(err)
+		logger.Error("Couldn't unmarshal message", err, nil)
+		return
 	}
 
 	logger = logger.With(watermill.LogFields{"message_uuid": fsMsg.UUID})
@@ -134,23 +132,31 @@ func (s *subscription) handleAddedEvent(ctx context.Context, doc *firestore.Docu
 	defer cancelCtx()
 
 	select {
+	case <-s.closing:
+		logger.Trace("Channel closed when waiting for consuming message", nil)
+		return
 	case <-ctx.Done():
+		logger.Trace("Context done when waiting for consuming message", nil)
 		return
 	case s.output <- msg:
+		logger.Trace("Message consumed, waiting for ack/nack", nil)
 		// message consumed, wait for ack/nack
 	}
 
 	select {
-	case <-msg.Acked():
-		_, err := doc.Ref.Delete(ctx, firestore.Exists)
-		if err != nil {
-			logger.Debug("Message deleted meanwhile", nil)
-			return
-		}
-		logger.Debug("Message acked", nil)
+	case <-s.closing:
+		logger.Trace("Closing when waiting for ack/nack", nil)
 	case <-msg.Nacked():
 		logger.Debug("Message nacked", nil)
 	case <-ctx.Done():
 		logger.Debug("Context done", nil)
+	case <-msg.Acked():
+		deleteCtx, _ := context.WithTimeout(context.Background(), time.Second*15)
+		_, err := doc.Ref.Delete(deleteCtx, firestore.Exists)
+		if err != nil {
+			logger.Trace("Message deleted meanwhile", nil)
+			return
+		}
+		logger.Debug("Message acked", nil)
 	}
 }

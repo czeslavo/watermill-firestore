@@ -8,29 +8,48 @@ import (
 	"cloud.google.com/go/firestore"
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
+const pubSubRootCollection = "pubsub"
+const subscriptionsCollection = "subscriptions"
+
 type SubscriberConfig struct {
+	// ProjectID is an ID of a Google Cloud project with Firestore database.
+	ProjectID string
+
+	// GenerateSubscriptionName should accept topic name and construct a subscription name basing on it.
 	GenerateSubscriptionName func(topic string) string
-	ProjectID                string
+
+	// PubSubRootCollection is a name of a collection which will be used as a root collection for the PubSub.
+	// It defaults to `pubsub`.
+	PubSubRootCollection string
+
+	// GoogleClientOpts are options passed directly to firestore client.
+	GoogleClientOpts []option.ClientOption
+}
+
+func (c *SubscriberConfig) setDefaults() {
+	if c.PubSubRootCollection == "" {
+		c.PubSubRootCollection = pubSubRootCollection
+	}
 }
 
 type Subscriber struct {
-	closed  bool
-	closing chan struct{}
-
-	client *firestore.Client
-
 	config SubscriberConfig
 	logger watermill.LoggerAdapter
 
+	client *firestore.Client
+
+	closed                       bool
+	closing                      chan struct{}
 	allSubscriptionsWaitingGroup sync.WaitGroup
 }
 
 func NewSubscriber(config SubscriberConfig, logger watermill.LoggerAdapter) (*Subscriber, error) {
-	client, err := firestore.NewClient(context.Background(), config.ProjectID)
+	client, err := firestore.NewClient(context.Background(), config.ProjectID, config.GoogleClientOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +77,7 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 		"subscription_name": subscriptionName,
 	})
 
-	sub, err := newSubscription(s.client, logger, subscriptionName, topic)
+	sub, err := newSubscription(s.client, logger, subscriptionName, topic, s.closing)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +127,7 @@ func (s *Subscriber) SubscribeInitialize(topic string) error {
 	ctx := context.Background()
 	_, err := s.client.Collection("pubsub").
 		Doc(topic).
-		Collection("subscriptions").
+		Collection(subscriptionsCollection).
 		Doc(s.config.GenerateSubscriptionName(topic)).Create(ctx, firestoreSubscription{Name: topic})
 	if status.Code(err) == codes.AlreadyExists {
 		return nil

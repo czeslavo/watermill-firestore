@@ -61,7 +61,7 @@ func publish(p *firestore.Publisher) {
 		if err != nil {
 			panic(err)
 		}
-		<-time.After(time.Second)
+		<-time.After(2 * time.Second)
 	}
 }
 
@@ -72,6 +72,7 @@ func read(output <-chan *message.Message) {
 			if msg == nil {
 				return
 			}
+			<-time.After(time.Second)
 			msg.Ack()
 		}
 	}
