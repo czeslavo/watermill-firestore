@@ -22,9 +22,6 @@ type subscription struct {
 	closing chan struct{}
 	output  chan *message.Message
 }
-type firestoreSubscription struct {
-	Name string `firestore:"name"`
-}
 
 func newSubscription(client *firestore.Client, logger watermill.LoggerAdapter, name, topic string, closing chan struct{}) (*subscription, error) {
 	s := &subscription{
@@ -49,7 +46,7 @@ func (s *subscription) createFirestoreSubIfNotExist(ctx context.Context, name, t
 	_, err := s.client.Collection("pubsub").
 		Doc(topic).
 		Collection(subscriptionsCollection).
-		Doc(name).Create(ctx, firestoreSubscription{Name: name})
+		Doc(name).Create(ctx, struct{}{})
 	if err != nil {
 		s.logger.Debug("Error creating subscription (possibly already exist)", nil)
 		return nil
@@ -75,7 +72,7 @@ func (s *subscription) receive(ctx context.Context) {
 		s.handleAddedEvent(ctx, doc, logger)
 	}
 
-	logger.Debug("Reading messages from sub", nil)
+	logger.Debug("Reading messages from sub", watermill.LogFields{"ctx_error": ctx.Err()})
 
 	subscriptionSnapshots := s.messagesQuery().Query.Snapshots(ctx)
 	defer subscriptionSnapshots.Stop()
@@ -151,7 +148,8 @@ func (s *subscription) handleAddedEvent(ctx context.Context, doc *firestore.Docu
 	case <-ctx.Done():
 		logger.Debug("Context done", nil)
 	case <-msg.Acked():
-		deleteCtx, _ := context.WithTimeout(context.Background(), time.Second*15)
+		deleteCtx, deleteCancel := context.WithTimeout(ctx, time.Second*15)
+		defer deleteCancel()
 		_, err := doc.Ref.Delete(deleteCtx, firestore.Exists)
 		if err != nil {
 			logger.Trace("Message deleted meanwhile", nil)

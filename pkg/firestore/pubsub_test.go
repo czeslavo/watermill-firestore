@@ -17,7 +17,7 @@ func createPubSub(t *testing.T) (message.Publisher, message.Subscriber) {
 }
 
 func createPubSubWithSubscriptionName(t *testing.T, subscriptionName string) (message.Publisher, message.Subscriber) {
-	logger := watermill.NewStdLogger(true, false)
+	logger := watermill.NewStdLogger(true, true)
 
 	pub, err := firestore.NewPublisher(
 		firestore.PublisherConfig{

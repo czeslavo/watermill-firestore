@@ -124,17 +124,21 @@ func (s *Subscriber) Close() error {
 }
 
 func (s *Subscriber) SubscribeInitialize(topic string) error {
+	logger := s.logger.With(watermill.LogFields{"topic": topic})
+
 	ctx := context.Background()
 	_, err := s.client.Collection("pubsub").
 		Doc(topic).
 		Collection(subscriptionsCollection).
-		Doc(s.config.GenerateSubscriptionName(topic)).Create(ctx, firestoreSubscription{Name: topic})
+		Doc(s.config.GenerateSubscriptionName(topic)).Create(ctx, struct{}{})
 	if status.Code(err) == codes.AlreadyExists {
+		logger.Trace("Subscription already exists", nil)
 		return nil
 	} else if err != nil {
+		logger.Error("Couldn't create subscription", err, nil)
 		return err
 	}
 
-	s.logger.Info("Created subscription", nil)
+	logger.Info("Created subscription", nil)
 	return nil
 }
