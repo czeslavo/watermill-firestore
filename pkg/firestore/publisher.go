@@ -18,11 +18,25 @@ type PublisherConfig struct {
 	ProjectID string
 
 	// PubSubRootCollection is a name of a collection which will be used as a root collection for the PubSub.
-	// It defaults to `pubsub`.
+	// It defaults to "pubsub".
 	PubSubRootCollection string
 
 	// MessagePublishTimeout is a timeout used for a single `Publish` call.
+	// It defaults to 1 minute.
 	MessagePublishTimeout time.Duration
+
+	// SubscriptionsCacheValidityDuration is used for internal subscriptions cache
+	// in order to reduce fetch calls to Firestore on each `Publish` method call.
+	//
+	// If you prefer to not cache subscriptions and fetch them each time `Publish`
+	// is called, please set `DontCacheSubscriptions` to true.
+	//
+	// It defaults to 500 milliseconds.
+	SubscriptionsCacheValidityDuration time.Duration
+
+	// DontCacheSubscriptions should be set to true when you don't want
+	// Publisher to keep an internal cache of subscribers.
+	DontCacheSubscriptions bool
 
 	// GoogleClientOpts are options passed directly to firestore client.
 	GoogleClientOpts []option.ClientOption
@@ -30,10 +44,13 @@ type PublisherConfig struct {
 
 func (c *PublisherConfig) setDefaults() {
 	if c.MessagePublishTimeout == 0 {
-		c.MessagePublishTimeout = time.Second * 60
+		c.MessagePublishTimeout = time.Minute
 	}
 	if c.PubSubRootCollection == "" {
-		c.PubSubRootCollection = pubSubRootCollection
+		c.PubSubRootCollection = defaultPubSubRootCollection
+	}
+	if c.SubscriptionsCacheValidityDuration == 0 {
+		c.SubscriptionsCacheValidityDuration = time.Millisecond * 500
 	}
 }
 
@@ -43,13 +60,13 @@ type Publisher struct {
 
 	client *firestore.Client
 
-	subCacheMtx        *sync.RWMutex
-	subscriptionsCache map[string]subCacheEntry
+	subscriptionsCacheMtx *sync.RWMutex
+	subscriptionsCache    map[string]subscriptionsCacheEntry
 }
 
-type subCacheEntry struct {
-	subNames  []string
-	lastWrite time.Time
+type subscriptionsCacheEntry struct {
+	subscriptionsNames []string
+	lastWrite          time.Time
 }
 
 func NewPublisher(config PublisherConfig, logger watermill.LoggerAdapter) (*Publisher, error) {
@@ -61,11 +78,11 @@ func NewPublisher(config PublisherConfig, logger watermill.LoggerAdapter) (*Publ
 	}
 
 	return &Publisher{
-		client:             client,
-		config:             config,
-		logger:             logger,
-		subCacheMtx:        &sync.RWMutex{},
-		subscriptionsCache: make(map[string]subCacheEntry),
+		client:                client,
+		config:                config,
+		logger:                logger,
+		subscriptionsCacheMtx: &sync.RWMutex{},
+		subscriptionsCache:    make(map[string]subscriptionsCacheEntry),
 	}, nil
 }
 
@@ -80,57 +97,34 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 		logger.Error("Failed to get subscriptions for publishing", err, nil)
 		return err
 	}
-
-	// prepare messages
-	var msgsToPublish []Message
-	for _, msg := range messages {
-		firestoreMsg := Message{
-			UUID:     msg.UUID,
-			Payload:  msg.Payload,
-			Metadata: make(map[string]interface{}),
-		}
-		for k, v := range msg.Metadata {
-			firestoreMsg.Metadata[k] = v
-		}
-		msgsToPublish = append(msgsToPublish, firestoreMsg)
-	}
-
 	logger = logger.With(watermill.LogFields{"subscriptions_count": len(subscriptions)})
 
-	logger.Debug("Publishing to topic", nil)
+	msgsToPublish := p.prepareFirestoreMessages(messages)
 
-	for _, sub := range subscriptions {
-		logger := logger.With(watermill.LogFields{"subscription": sub})
+	logger.Trace("Publishing to topic", nil)
+
+	for _, subscription := range subscriptions {
+		logger := logger.With(watermill.LogFields{"subscription": subscription})
 		logger.Trace("Publishing to subscription", nil)
 
 		// in case of single message just use single add operation
 		if len(msgsToPublish) == 1 {
-			if _, _, err := p.client.Collection(p.config.PubSubRootCollection).Doc(topic).Collection(sub).Add(ctx, msgsToPublish[0]); err != nil {
+			if _, _, err := p.client.Collection(p.config.PubSubRootCollection).Doc(topic).Collection(subscription).Add(ctx, msgsToPublish[0]); err != nil {
+				logger.Error("Failed to publish message", err, nil)
 				return err
 			}
+			logger.Trace("Published message to subscription", nil)
 			continue
 		}
 
-		// write in batches with max 500 msgs since it's the limit on firestore side
-		for offset := 0; offset < len(msgsToPublish); offset = offset + 500 {
-			lastInBatch := offset + 500
-			if len(msgsToPublish) < lastInBatch {
-				lastInBatch = len(msgsToPublish)
-			}
-			logger.Trace("Publishing batch", watermill.LogFields{"batch_start": offset, "batch_end": lastInBatch})
-
-			batch := p.client.Batch()
-			for _, msg := range msgsToPublish[offset:lastInBatch] {
-				batch = batch.Create(p.client.Collection(p.config.PubSubRootCollection).Doc(topic).Collection(sub).NewDoc(), msg)
-			}
-			if _, err := batch.Commit(ctx); err != nil {
-				logger.Error("Failed to commit messages batch", err, nil)
-				return err
-			}
+		if err := p.publishInBatches(ctx, topic, subscription, msgsToPublish, logger); err != nil {
+			return err
 		}
-		logger.Debug("Published messages to subscription", nil)
+
+		logger.Trace("Published messages to subscription", nil)
 	}
 
+	logger.Debug("Published to topic", nil)
 	return nil
 }
 
@@ -161,33 +155,64 @@ func (p *Publisher) getSubscriptions(ctx context.Context, topic string) ([]strin
 }
 
 func (p *Publisher) getSubscriptionsFromCache(topic string) []string {
-	p.subCacheMtx.RLock()
-	defer p.subCacheMtx.RUnlock()
-	return p.subscriptionsCache[topic].subNames
+	p.subscriptionsCacheMtx.RLock()
+	defer p.subscriptionsCacheMtx.RUnlock()
+	return p.subscriptionsCache[topic].subscriptionsNames
 }
 
 func (p *Publisher) cacheSubscriptions(topic string, subs []string) {
-	p.subCacheMtx.Lock()
-	defer p.subCacheMtx.Unlock()
-	entry := subCacheEntry{
-		lastWrite: time.Now(),
-		subNames:  subs,
+	p.subscriptionsCacheMtx.Lock()
+	defer p.subscriptionsCacheMtx.Unlock()
+	entry := subscriptionsCacheEntry{
+		lastWrite:          time.Now(),
+		subscriptionsNames: subs,
 	}
 	p.subscriptionsCache[topic] = entry
 }
 
 func (p *Publisher) isCacheValid(topic string) bool {
-	p.subCacheMtx.RLock()
-	defer p.subCacheMtx.RUnlock()
-	return time.Now().Before(p.subscriptionsCache[topic].lastWrite.Add(time.Millisecond * 500))
+	p.subscriptionsCacheMtx.RLock()
+	defer p.subscriptionsCacheMtx.RUnlock()
+	return time.Now().Before(p.subscriptionsCache[topic].lastWrite.Add(p.config.SubscriptionsCacheValidityDuration))
 }
 
-func (p *Publisher) publishMessage(ctx context.Context, topic, sub string, msg Message) error {
-	subCol := p.client.Collection(p.config.PubSubRootCollection).Doc(topic).Collection(sub)
+func (p *Publisher) prepareFirestoreMessages(messages []*message.Message) []Message {
+	var msgsToPublish []Message
+	for _, msg := range messages {
+		firestoreMsg := Message{
+			UUID:     msg.UUID,
+			Payload:  msg.Payload,
+			Metadata: make(map[string]interface{}),
+		}
+		for k, v := range msg.Metadata {
+			firestoreMsg.Metadata[k] = v
+		}
+		msgsToPublish = append(msgsToPublish, firestoreMsg)
+	}
 
-	_, _, err := subCol.Add(ctx, msg)
-	if err != nil {
-		return err
+	return msgsToPublish
+}
+
+func (p *Publisher) publishInBatches(ctx context.Context, topic, subscription string, messages []Message, logger watermill.LoggerAdapter) error {
+	const firestoreBatchSizeLimit = 500
+	for offset := 0; offset < len(messages); offset = offset + firestoreBatchSizeLimit {
+		lastInBatch := offset + firestoreBatchSizeLimit
+		if len(messages) < lastInBatch {
+			lastInBatch = len(messages)
+		}
+		logger := logger.With(watermill.LogFields{"batch_start": offset, "batch_end": lastInBatch})
+		logger.Trace("Publishing messages batch", nil)
+
+		batch := p.client.Batch()
+		for _, msg := range messages[offset:lastInBatch] {
+			batch = batch.Create(p.client.Collection(p.config.PubSubRootCollection).Doc(topic).Collection(subscription).NewDoc(), msg)
+		}
+
+		if _, err := batch.Commit(ctx); err != nil {
+			logger.Error("Failed to commit messages batch", err, nil)
+			return err
+		}
+		logger.Trace("Published messages batch", nil)
 	}
 
 	return nil

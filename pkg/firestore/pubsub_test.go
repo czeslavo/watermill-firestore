@@ -4,6 +4,7 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
@@ -21,7 +22,8 @@ func createPubSubWithSubscriptionName(t *testing.T, subscriptionName string) (me
 
 	pub, err := firestore.NewPublisher(
 		firestore.PublisherConfig{
-			ProjectID: os.Getenv("FIRESTORE_PROJECT_ID"),
+			ProjectID:             os.Getenv("FIRESTORE_PROJECT_ID"),
+			MessagePublishTimeout: time.Second * 60,
 		},
 		logger,
 	)
@@ -31,10 +33,9 @@ func createPubSubWithSubscriptionName(t *testing.T, subscriptionName string) (me
 
 	sub, err := firestore.NewSubscriber(
 		firestore.SubscriberConfig{
-			GenerateSubscriptionName: func(topic string) string {
-				return topic + subscriptionName
-			},
-			ProjectID: os.Getenv("FIRESTORE_PROJECT_ID"),
+			ProjectID:                os.Getenv("FIRESTORE_PROJECT_ID"),
+			GenerateSubscriptionName: func(topic string) string { return topic + "_" + subscriptionName },
+			Timeout:                  time.Second * 30,
 		},
 		logger,
 	)

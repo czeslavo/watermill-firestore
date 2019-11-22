@@ -2,7 +2,6 @@ package firestore
 
 import (
 	"context"
-	"time"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
@@ -16,77 +15,64 @@ import (
 type subscription struct {
 	name   string
 	topic  string
-	logger watermill.LoggerAdapter
+	config SubscriberConfig
+
 	client *firestore.Client
+	logger watermill.LoggerAdapter
 
 	closing chan struct{}
 	output  chan *message.Message
 }
 
-func newSubscription(client *firestore.Client, logger watermill.LoggerAdapter, name, topic string, closing chan struct{}) (*subscription, error) {
+func newSubscription(name, topic string, config SubscriberConfig, client *firestore.Client, logger watermill.LoggerAdapter, closing chan struct{}) (*subscription, error) {
 	s := &subscription{
 		name:    name,
 		topic:   topic,
-		logger:  logger,
+		config:  config,
 		client:  client,
-		output:  make(chan *message.Message),
+		logger:  logger,
 		closing: closing,
+		output:  make(chan *message.Message),
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
-	if err := s.createFirestoreSubIfNotExist(ctx, name, topic); err != nil {
+	if err := createFirestoreSubscriptionIfNotExists(s.client, topic, s.config.GenerateSubscriptionName(topic), s.logger, s.config.Timeout); err != nil {
 		return nil, err
 	}
 
 	return s, nil
 }
 
-func (s *subscription) createFirestoreSubIfNotExist(ctx context.Context, name, topic string) error {
-	_, err := s.client.Collection("pubsub").
-		Doc(topic).
-		Collection(subscriptionsCollection).
-		Doc(name).Create(ctx, struct{}{})
-	if err != nil {
-		s.logger.Debug("Error creating subscription (possibly already exist)", nil)
-		return nil
-	}
-
-	s.logger.Info("Created subscription", nil)
-	return nil
-}
-
-func (s *subscription) messagesQuery() *firestore.CollectionRef {
-	return s.client.Collection("pubsub").Doc(s.topic).Collection(s.name)
-}
-
 func (s *subscription) receive(ctx context.Context) {
-	logger := s.logger.With(watermill.LogFields{"topic": s.topic, "collection": s.name})
+	s.readAll(ctx)
+	s.watchChanges(ctx)
+}
 
-	logger.Debug("Reading messages on receive start", nil)
-	docs, err := s.messagesQuery().Limit(100).Documents(ctx).GetAll()
+func (s *subscription) readAll(ctx context.Context) {
+	s.logger.Debug("Reading messages on receive start", nil)
+	docs, err := s.messagesQuery().Documents(ctx).GetAll()
 	if err != nil {
-		logger.Error("Couldn't read messages on receive start", err, nil)
+		s.logger.Error("Couldn't read messages on receive start", err, nil)
 	}
 	for _, doc := range docs {
-		s.handleAddedEvent(ctx, doc, logger)
+		s.handleAddedMessage(ctx, doc)
 	}
 
-	logger.Debug("Reading messages from sub", watermill.LogFields{"ctx_error": ctx.Err()})
+	s.logger.Trace("Reading messages from sub", nil)
+}
 
+func (s *subscription) watchChanges(ctx context.Context) {
 	subscriptionSnapshots := s.messagesQuery().Query.Snapshots(ctx)
 	defer subscriptionSnapshots.Stop()
-
 	for {
 		subscriptionSnapshot, err := subscriptionSnapshots.Next()
 		if err == iterator.Done {
-			logger.Debug("Listening on subscription done", nil)
+			s.logger.Debug("Listening on subscription done", nil)
 			break
 		} else if status.Code(err) == codes.Canceled {
-			logger.Debug("Receive context canceled", nil)
+			s.logger.Debug("Receive context canceled", nil)
 			break
 		} else if err != nil {
-			logger.Error("Error receiving", err, nil)
+			s.logger.Error("Error receiving", err, nil)
 			break
 		}
 
@@ -94,13 +80,17 @@ func (s *subscription) receive(ctx context.Context) {
 			continue
 		}
 
-		for _, e := range onlyAddedEvents(subscriptionSnapshot.Changes) {
-			s.handleAddedEvent(ctx, e.Doc, logger)
+		for _, e := range onlyAddedMessages(subscriptionSnapshot.Changes) {
+			s.handleAddedMessage(ctx, e.Doc)
 		}
 	}
 }
 
-func onlyAddedEvents(changes []firestore.DocumentChange) (added []firestore.DocumentChange) {
+func (s *subscription) messagesQuery() *firestore.CollectionRef {
+	return s.client.Collection(s.config.PubSubRootCollection).Doc(s.topic).Collection(s.name)
+}
+
+func onlyAddedMessages(changes []firestore.DocumentChange) (added []firestore.DocumentChange) {
 	for _, ch := range changes {
 		if ch.Kind == firestore.DocumentAdded {
 			added = append(added, ch)
@@ -109,8 +99,8 @@ func onlyAddedEvents(changes []firestore.DocumentChange) (added []firestore.Docu
 	return
 }
 
-func (s *subscription) handleAddedEvent(ctx context.Context, doc *firestore.DocumentSnapshot, logger watermill.LoggerAdapter) {
-	logger = logger.With(watermill.LogFields{"document_id": doc.Ref.ID})
+func (s *subscription) handleAddedMessage(ctx context.Context, doc *firestore.DocumentSnapshot) {
+	logger := s.logger.With(watermill.LogFields{"document_id": doc.Ref.ID})
 
 	fsMsg := Message{}
 	if err := doc.DataTo(&fsMsg); err != nil {
@@ -144,17 +134,29 @@ func (s *subscription) handleAddedEvent(ctx context.Context, doc *firestore.Docu
 	case <-s.closing:
 		logger.Trace("Closing when waiting for ack/nack", nil)
 	case <-msg.Nacked():
-		logger.Debug("Message nacked", nil)
+		logger.Trace("Message nacked", nil)
 	case <-ctx.Done():
-		logger.Debug("Context done", nil)
+		logger.Trace("Context done", nil)
 	case <-msg.Acked():
-		deleteCtx, deleteCancel := context.WithTimeout(ctx, time.Second*15)
-		defer deleteCancel()
-		_, err := doc.Ref.Delete(deleteCtx, firestore.Exists)
-		if err != nil {
-			logger.Trace("Message deleted meanwhile", nil)
+		if err := s.ackMessage(ctx, doc, logger); err != nil {
+			logger.Error("Failed to ack message", err, nil)
 			return
 		}
-		logger.Debug("Message acked", nil)
+		logger.Trace("Message acked", nil)
 	}
+}
+
+func (s *subscription) ackMessage(ctx context.Context, message *firestore.DocumentSnapshot, logger watermill.LoggerAdapter) error {
+	deleteCtx, deleteCancel := context.WithTimeout(ctx, s.config.Timeout)
+	defer deleteCancel()
+	_, err := message.Ref.Delete(deleteCtx, firestore.Exists)
+	if status.Code(err) == codes.NotFound {
+		logger.Trace("Message deleted meanwhile", nil)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
