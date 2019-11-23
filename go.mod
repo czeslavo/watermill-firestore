@@ -5,6 +5,7 @@ go 1.12
 require (
 	cloud.google.com/go v0.45.1
 	cloud.google.com/go/pubsub v1.0.1 // indirect
+	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/ThreeDotsLabs/watermill v1.0.2
 	github.com/ThreeDotsLabs/watermill-googlecloud v1.0.2 // indirect
 	github.com/google/uuid v1.1.1

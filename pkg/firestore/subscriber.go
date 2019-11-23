@@ -132,6 +132,22 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 	return sub.output, nil
 }
 
+func (s *Subscriber) QueueLength(topic string) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.config.Timeout)
+	defer cancel()
+	docs, err := s.subscriptionCollection(topic).Documents(ctx).GetAll()
+	if err != nil {
+		s.logger.Error("Failed to get queue length", err, watermill.LogFields{"topic": topic})
+		return 0, err
+	}
+
+	return len(docs), nil
+}
+
+func (s *Subscriber) subscriptionCollection(topic string) *firestore.CollectionRef {
+	return s.client.Collection(s.config.PubSubRootCollection).Doc(topic).Collection(s.config.GenerateSubscriptionName(topic))
+}
+
 func (s *Subscriber) Close() error {
 	if s.closed {
 		return nil
@@ -171,5 +187,4 @@ func createFirestoreSubscriptionIfNotExists(client *firestore.Client, topic, sub
 
 	logger.Debug("Created subscription", nil)
 	return nil
-
 }

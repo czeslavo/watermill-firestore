@@ -128,6 +128,40 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 	return nil
 }
 
+func (p *Publisher) PublishInTransaction(topic string, t *firestore.Transaction, messages ...*message.Message) error {
+	ctx, cancel := context.WithTimeout(context.Background(), p.config.MessagePublishTimeout)
+	defer cancel()
+
+	logger := p.logger.With(watermill.LogFields{"topic": topic})
+
+	subscriptions, err := p.getSubscriptions(ctx, topic)
+	if err != nil {
+		logger.Error("Failed to get subscriptions for publishing", err, nil)
+		return err
+	}
+	logger = logger.With(watermill.LogFields{"subscriptions_count": len(subscriptions)})
+
+	msgsToPublish := p.prepareFirestoreMessages(messages)
+
+	logger.Trace("Publishing to topic", nil)
+
+	for _, subscription := range subscriptions {
+		logger := logger.With(watermill.LogFields{"subscription": subscription})
+		logger.Trace("Publishing to subscription", nil)
+
+		for _, message := range msgsToPublish {
+			if err := t.Create(p.client.Collection(p.config.PubSubRootCollection).Doc(topic).Collection(subscription).NewDoc(), message); err != nil {
+				logger.Error("Failed to add message to transaction", err, nil)
+				return err
+			}
+			logger.Trace("Added message to transaction", nil)
+			continue
+		}
+	}
+
+	return nil
+}
+
 func (p *Publisher) getSubscriptions(ctx context.Context, topic string) ([]string, error) {
 	logger := p.logger.With(watermill.LogFields{"topic": topic})
 
