@@ -35,7 +35,7 @@ func newSubscription(name, topic string, config SubscriberConfig, client *firest
 		output:  make(chan *message.Message),
 	}
 
-	if err := createFirestoreSubscriptionIfNotExists(s.client, topic, s.config.GenerateSubscriptionName(topic), s.logger, s.config.Timeout); err != nil {
+	if err := createFirestoreSubscriptionIfNotExists(s.client, config.PubSubRootCollection, topic, s.config.GenerateSubscriptionName(topic), s.logger, s.config.Timeout); err != nil {
 		return nil, err
 	}
 

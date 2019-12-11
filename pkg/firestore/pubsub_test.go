@@ -23,6 +23,7 @@ func createPubSubWithSubscriptionName(t *testing.T, subscriptionName string) (me
 	pub, err := firestore.NewPublisher(
 		firestore.PublisherConfig{
 			ProjectID:             os.Getenv("FIRESTORE_PROJECT_ID"),
+			PubSubRootCollection:  "test-root",
 			MessagePublishTimeout: time.Second * 60,
 		},
 		logger,
@@ -34,6 +35,7 @@ func createPubSubWithSubscriptionName(t *testing.T, subscriptionName string) (me
 	sub, err := firestore.NewSubscriber(
 		firestore.SubscriberConfig{
 			ProjectID:                os.Getenv("FIRESTORE_PROJECT_ID"),
+			PubSubRootCollection:     "test-root",
 			GenerateSubscriptionName: func(topic string) string { return topic + "_" + subscriptionName },
 			Timeout:                  time.Second * 30,
 		},

@@ -167,16 +167,16 @@ func (s *Subscriber) Close() error {
 }
 
 func (s *Subscriber) SubscribeInitialize(topic string) error {
-	return createFirestoreSubscriptionIfNotExists(s.client, topic, s.config.GenerateSubscriptionName(topic), s.logger, s.config.Timeout)
+	return createFirestoreSubscriptionIfNotExists(s.client, s.config.PubSubRootCollection, topic, s.config.GenerateSubscriptionName(topic), s.logger, s.config.Timeout)
 }
 
-func createFirestoreSubscriptionIfNotExists(client *firestore.Client, topic, subscription string, logger watermill.LoggerAdapter, timeout time.Duration) error {
+func createFirestoreSubscriptionIfNotExists(client *firestore.Client, rootCollection, topic, subscription string, logger watermill.LoggerAdapter, timeout time.Duration) error {
 	logger = logger.With(watermill.LogFields{"topic": topic})
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	_, err := client.Collection("pubsub").Doc(topic).Collection(subscriptionsCollection).Doc(subscription).Create(ctx, struct{}{})
+	_, err := client.Collection(rootCollection).Doc(topic).Collection(subscriptionsCollection).Doc(subscription).Create(ctx, struct{}{})
 	if status.Code(err) == codes.AlreadyExists {
 		logger.Trace("Subscription already exists", nil)
 		return nil
