@@ -42,6 +42,9 @@ type SubscriberConfig struct {
 
 	// GoogleClientOpts are options passed directly to firestore client.
 	GoogleClientOpts []option.ClientOption
+
+	// Marshaler marshals message from Watermill to Firestore format and vice versa.
+	Marshaler Marshaler
 }
 
 func (c *SubscriberConfig) setDefaults() {
@@ -53,6 +56,9 @@ func (c *SubscriberConfig) setDefaults() {
 	}
 	if c.GenerateSubscriptionName == nil {
 		c.GenerateSubscriptionName = DefaultGenerateSubscriptionName
+	}
+	if c.Marshaler == nil {
+		c.Marshaler = DefaultMarshaler{}
 	}
 }
 
