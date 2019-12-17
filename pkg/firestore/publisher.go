@@ -152,7 +152,7 @@ func (p *Publisher) PublishInTransaction(topic string, t *firestore.Transaction,
 
 		for _, marshaledMessage := range marshaledMessages {
 			doc := p.client.Collection(p.config.PubSubRootCollection).Doc(topic).Collection(subscription).NewDoc()
-			if err := t.Create(doc, marshaledMessage); err != nil {
+			if err := t.Create(doc, marshaledMessage.Data); err != nil {
 				logger.Error("Failed to add message to transaction", err, nil)
 				return err
 			}
