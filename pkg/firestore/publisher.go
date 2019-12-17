@@ -2,6 +2,7 @@ package firestore
 
 import (
 	"context"
+	"github.com/pkg/errors"
 	"sync"
 	"time"
 
@@ -40,6 +41,9 @@ type PublisherConfig struct {
 
 	// GoogleClientOpts are options passed directly to firestore client.
 	GoogleClientOpts []option.ClientOption
+
+	// Marshaler marshals message from Watermill to Firestore format and vice versa.
+	Marshaler Marshaler
 }
 
 func (c *PublisherConfig) setDefaults() {
@@ -51,6 +55,9 @@ func (c *PublisherConfig) setDefaults() {
 	}
 	if c.SubscriptionsCacheValidityDuration == 0 {
 		c.SubscriptionsCacheValidityDuration = time.Millisecond * 500
+	}
+	if c.Marshaler == nil {
+		c.Marshaler = DefaultMarshaler{}
 	}
 }
 
@@ -99,7 +106,10 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 	}
 	logger = logger.With(watermill.LogFields{"subscriptions_count": len(subscriptions)})
 
-	msgsToPublish := p.prepareFirestoreMessages(messages)
+	msgsToPublish, err := p.prepareFirestoreMessages(messages)
+	if err != nil {
+		return errors.Wrap(err, "cannot prepare messages to publish")
+	}
 
 	logger.Trace("Publishing to topic", nil)
 
@@ -107,21 +117,9 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 		logger := logger.With(watermill.LogFields{"subscription": subscription})
 		logger.Trace("Publishing to subscription", nil)
 
-		// in case of single message just use single add operation
-		if len(msgsToPublish) == 1 {
-			if _, _, err := p.client.Collection(p.config.PubSubRootCollection).Doc(topic).Collection(subscription).Add(ctx, msgsToPublish[0]); err != nil {
-				logger.Error("Failed to publish message", err, nil)
-				return err
-			}
-			logger.Trace("Published message to subscription", nil)
-			continue
-		}
-
 		if err := p.publishInBatches(ctx, topic, subscription, msgsToPublish, logger); err != nil {
 			return err
 		}
-
-		logger.Trace("Published messages to subscription", nil)
 	}
 
 	logger.Debug("Published to topic", nil)
@@ -141,7 +139,10 @@ func (p *Publisher) PublishInTransaction(topic string, t *firestore.Transaction,
 	}
 	logger = logger.With(watermill.LogFields{"subscriptions_count": len(subscriptions)})
 
-	msgsToPublish := p.prepareFirestoreMessages(messages)
+	marshaledMessages, err := p.prepareFirestoreMessages(messages)
+	if err != nil {
+		return errors.Wrap(err, "cannot prepare messages to publish")
+	}
 
 	logger.Trace("Publishing to topic", nil)
 
@@ -149,11 +150,19 @@ func (p *Publisher) PublishInTransaction(topic string, t *firestore.Transaction,
 		logger := logger.With(watermill.LogFields{"subscription": subscription})
 		logger.Trace("Publishing to subscription", nil)
 
-		for _, message := range msgsToPublish {
-			if err := t.Create(p.client.Collection(p.config.PubSubRootCollection).Doc(topic).Collection(subscription).NewDoc(), message); err != nil {
+		for _, marshaledMessage := range marshaledMessages {
+			doc := p.client.Collection(p.config.PubSubRootCollection).Doc(topic).Collection(subscription).NewDoc()
+			if err := t.Create(doc, marshaledMessage); err != nil {
 				logger.Error("Failed to add message to transaction", err, nil)
 				return err
 			}
+
+			logger.Debug("Publishing message to firestore", watermill.LogFields{
+				"firestore_path":   doc.Path,
+				"firestore_doc_id": doc.ID,
+				"message_uuid":     marshaledMessage.MessageUUID,
+			})
+
 			logger.Trace("Added message to transaction", nil)
 			continue
 		}
@@ -210,43 +219,65 @@ func (p *Publisher) isCacheValid(topic string) bool {
 	return time.Now().Before(p.subscriptionsCache[topic].lastWrite.Add(p.config.SubscriptionsCacheValidityDuration))
 }
 
-func (p *Publisher) prepareFirestoreMessages(messages []*message.Message) []Message {
-	var msgsToPublish []Message
-	for _, msg := range messages {
-		firestoreMsg := Message{
-			UUID:     msg.UUID,
-			Payload:  msg.Payload,
-			Metadata: make(map[string]interface{}),
-		}
-		for k, v := range msg.Metadata {
-			firestoreMsg.Metadata[k] = v
-		}
-		msgsToPublish = append(msgsToPublish, firestoreMsg)
-	}
-
-	return msgsToPublish
+type marshaledMessage struct {
+	MessageUUID string
+	Data        interface{}
 }
 
-func (p *Publisher) publishInBatches(ctx context.Context, topic, subscription string, messages []Message, logger watermill.LoggerAdapter) error {
-	const firestoreBatchSizeLimit = 500
-	for offset := 0; offset < len(messages); offset = offset + firestoreBatchSizeLimit {
-		lastInBatch := offset + firestoreBatchSizeLimit
-		if len(messages) < lastInBatch {
-			lastInBatch = len(messages)
+func (p *Publisher) prepareFirestoreMessages(messages []*message.Message) ([]marshaledMessage, error) {
+	var msgsToPublish []marshaledMessage
+	for _, msg := range messages {
+		firestoreMsg, err := p.config.Marshaler.Marshal(msg)
+		if err != nil {
+			return nil, err
 		}
-		logger := logger.With(watermill.LogFields{"batch_start": offset, "batch_end": lastInBatch})
+
+		msgsToPublish = append(msgsToPublish, marshaledMessage{
+			MessageUUID: msg.UUID,
+			Data:        firestoreMsg,
+		})
+	}
+
+	return msgsToPublish, nil
+}
+
+func (p *Publisher) publishInBatches(
+	ctx context.Context,
+	topic,
+	subscription string,
+	marshaledMsgs []marshaledMessage,
+	logger watermill.LoggerAdapter,
+) error {
+	const firestoreBatchSizeLimit = 500
+	for offset := 0; offset < len(marshaledMsgs); offset = offset + firestoreBatchSizeLimit {
+		lastInBatch := offset + firestoreBatchSizeLimit
+		if len(marshaledMsgs) < lastInBatch {
+			lastInBatch = len(marshaledMsgs)
+		}
+
+		logger := logger.With(watermill.LogFields{
+			"batch_start": offset,
+			"batch_end":   lastInBatch,
+		})
 		logger.Trace("Publishing messages batch", nil)
 
 		batch := p.client.Batch()
-		for _, msg := range messages[offset:lastInBatch] {
-			batch = batch.Create(p.client.Collection(p.config.PubSubRootCollection).Doc(topic).Collection(subscription).NewDoc(), msg)
+		for _, marshaledMsg := range marshaledMsgs[offset:lastInBatch] {
+			doc := p.client.Collection(p.config.PubSubRootCollection).Doc(topic).Collection(subscription).NewDoc()
+			batch = batch.Create(doc, marshaledMsg.Data)
+
+			logger.Debug("Publishing message to firestore", watermill.LogFields{
+				"firestore_path":   doc.Path,
+				"firestore_doc_id": doc.ID,
+				"message_uuid":     marshaledMsg.MessageUUID,
+			})
 		}
 
 		if _, err := batch.Commit(ctx); err != nil {
 			logger.Error("Failed to commit messages batch", err, nil)
 			return err
 		}
-		logger.Trace("Published messages batch", nil)
+		logger.Trace("Published message", nil)
 	}
 
 	return nil

@@ -102,18 +102,12 @@ func onlyAddedMessages(changes []firestore.DocumentChange) (added []firestore.Do
 func (s *subscription) handleAddedMessage(ctx context.Context, doc *firestore.DocumentSnapshot) {
 	logger := s.logger.With(watermill.LogFields{"document_id": doc.Ref.ID})
 
-	fsMsg := Message{}
-	if err := doc.DataTo(&fsMsg); err != nil {
+	msg, err := s.config.Marshaler.Unmarshal(doc)
+	if err != nil {
 		logger.Error("Couldn't unmarshal message", err, nil)
 		return
 	}
 
-	logger = logger.With(watermill.LogFields{"message_uuid": fsMsg.UUID})
-
-	msg := message.NewMessage(fsMsg.UUID, fsMsg.Payload)
-	for k, v := range fsMsg.Metadata {
-		msg.Metadata.Set(k, v.(string))
-	}
 	ctx, cancelCtx := context.WithCancel(ctx)
 	msg.SetContext(ctx)
 	defer cancelCtx()
