@@ -77,6 +77,8 @@ type Subscriber struct {
 	closed                       bool
 	closing                      chan struct{}
 	allSubscriptionsWaitingGroup sync.WaitGroup
+
+	closedMutex sync.Mutex
 }
 
 func NewSubscriber(config SubscriberConfig, logger watermill.LoggerAdapter) (*Subscriber, error) {
@@ -97,9 +99,14 @@ func NewSubscriber(config SubscriberConfig, logger watermill.LoggerAdapter) (*Su
 }
 
 func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *message.Message, error) {
+	s.closedMutex.Lock()
+
 	if s.closed {
+		s.closedMutex.Unlock()
 		return nil, errors.New("subscriber is closed")
 	}
+
+	s.closedMutex.Unlock()
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -155,6 +162,9 @@ func (s *Subscriber) subscriptionCollection(topic string) *firestore.CollectionR
 }
 
 func (s *Subscriber) Close() error {
+	s.closedMutex.Lock()
+	defer s.closedMutex.Unlock()
+
 	if s.closed {
 		return nil
 	}
