@@ -2,9 +2,10 @@ package firestore
 
 import (
 	"context"
-	"github.com/pkg/errors"
 	"sync"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"cloud.google.com/go/firestore"
 	"github.com/ThreeDotsLabs/watermill"
@@ -126,7 +127,7 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 	return nil
 }
 
-func (p *Publisher) PublishInTransaction(topic string, t *firestore.Transaction, messages ...*message.Message) error {
+func (p *Publisher) PublishInTransaction(topic string, tx *firestore.Transaction, messages ...*message.Message) error {
 	ctx, cancel := context.WithTimeout(context.Background(), p.config.MessagePublishTimeout)
 	defer cancel()
 
@@ -152,7 +153,7 @@ func (p *Publisher) PublishInTransaction(topic string, t *firestore.Transaction,
 
 		for _, marshaledMessage := range marshaledMessages {
 			doc := p.client.Collection(p.config.PubSubRootCollection).Doc(topic).Collection(subscription).NewDoc()
-			if err := t.Create(doc, marshaledMessage.Data); err != nil {
+			if err := tx.Create(doc, marshaledMessage.Data); err != nil {
 				logger.Error("Failed to add message to transaction", err, nil)
 				return err
 			}

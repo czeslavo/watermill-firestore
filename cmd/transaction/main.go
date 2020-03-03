@@ -9,8 +9,8 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/Pallinder/go-randomdata"
 	"cloud.google.com/go/firestore"
+	"github.com/Pallinder/go-randomdata"
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
 	watermillFirestore "github.com/czeslavo/watermill-firestore/pkg/firestore"
@@ -135,4 +135,3 @@ func monitorQueueLength(sub *watermillFirestore.Subscriber, topic string, logger
 		<-time.After(time.Second)
 	}
 }
-

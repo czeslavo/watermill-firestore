@@ -1,13 +1,9 @@
-# for Watermill development purposes.
-# For Watermill based application docker please check https://watermill.io/docs/getting-started/
-
 version: '3'
 services:
   firestore:
-    build:
-      context: ./emulator
+    image: karhoo/firestore-emulator:0.2
     env_file:
       - "./.env"
     ports:
-      - 8080:8080
+      - 8787:8787
     restart: unless-stopped

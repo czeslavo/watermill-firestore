@@ -69,7 +69,7 @@ func (s *subscription) watchChanges(ctx context.Context) {
 			s.logger.Debug("Listening on subscription done", nil)
 			break
 		} else if status.Code(err) == codes.Canceled {
-			s.logger.Debug("Receive context canceled", nil)
+			s.logger.Debug("Received context canceled", nil)
 			break
 		} else if err != nil {
 			s.logger.Error("Error receiving", err, nil)
@@ -112,6 +112,7 @@ func (s *subscription) handleAddedMessage(ctx context.Context, doc *firestore.Do
 	msg.SetContext(ctx)
 	defer cancelCtx()
 
+	// lock message processing
 	select {
 	case <-s.closing:
 		logger.Trace("Channel closed when waiting for consuming message", nil)
@@ -124,6 +125,8 @@ func (s *subscription) handleAddedMessage(ctx context.Context, doc *firestore.Do
 		// message consumed, wait for ack/nack
 	}
 
+	// message is processed right now, lock it
+
 	select {
 	case <-s.closing:
 		logger.Trace("Closing when waiting for ack/nack", nil)
@@ -132,7 +135,7 @@ func (s *subscription) handleAddedMessage(ctx context.Context, doc *firestore.Do
 	case <-ctx.Done():
 		logger.Trace("Context done", nil)
 	case <-msg.Acked():
-		if err := s.ackMessage(ctx, doc, logger); err != nil {
+		if err := s.removeMessage(ctx, doc, logger); err != nil {
 			logger.Error("Failed to ack message", err, nil)
 			return
 		}
@@ -140,7 +143,7 @@ func (s *subscription) handleAddedMessage(ctx context.Context, doc *firestore.Do
 	}
 }
 
-func (s *subscription) ackMessage(ctx context.Context, message *firestore.DocumentSnapshot, logger watermill.LoggerAdapter) error {
+func (s *subscription) removeMessage(ctx context.Context, message *firestore.DocumentSnapshot, logger watermill.LoggerAdapter) error {
 	deleteCtx, deleteCancel := context.WithTimeout(ctx, s.config.Timeout)
 	defer deleteCancel()
 	_, err := message.Ref.Delete(deleteCtx, firestore.Exists)
