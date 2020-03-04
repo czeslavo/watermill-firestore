@@ -48,6 +48,7 @@ func generateUUIDs(n int) []string {
 }
 
 func TestLock_parallel(t *testing.T) {
+	t.Skip()
 	client, err := firestore.NewClient(context.Background(), os.Getenv("FIRESTORE_PROJECT_ID"))
 	require.NoError(t, err)
 
@@ -58,7 +59,6 @@ func TestLock_parallel(t *testing.T) {
 	var acquiredLocksChs []chan int
 
 	uuids := generateUUIDs(workQueueLength)
-	//unlockAll(t, locker, uuids)
 
 	for i := 0; i < workersCount; i++ {
 		acquiredLocksChs = append(acquiredLocksChs, lockingWorker(t, locker, uuids, beginWorkCh))
@@ -72,16 +72,6 @@ func TestLock_parallel(t *testing.T) {
 	}
 
 	require.Equal(t, workQueueLength, acquiredLocksSum)
-}
-
-func unlockAll(t *testing.T, locker *watermillFirestore.MessageLocker, uuids []string) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
-	for _, uuid := range uuids {
-		t.Log(uuid)
-		err := locker.Unlock(ctx, uuid)
-		require.NoError(t, err)
-	}
 }
 
 func lockingWorker(t *testing.T, locker *watermillFirestore.MessageLocker, uuids []string, beginWorkCh chan struct{}) chan int {
@@ -99,6 +89,7 @@ func lockingWorker(t *testing.T, locker *watermillFirestore.MessageLocker, uuids
 		for _, uuid := range uuids {
 			_, err := locker.Lock(ctx, uuid)
 			if err != nil {
+				t.Logf("not acquired: %s", err)
 				continue
 			}
 			acquiredLocksCounter++

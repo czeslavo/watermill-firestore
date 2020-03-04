@@ -12,9 +12,10 @@ type Marshaler interface {
 }
 
 type Message struct {
-	UUID     string            `firestore:"uuid"`
-	Metadata map[string]string `firestore:"metadata"`
-	Payload  string            `firestore:"payload"`
+	UUID       string            `firestore:"uuid"`
+	Metadata   map[string]string `firestore:"metadata"`
+	Payload    string            `firestore:"payload"`
+	Processing bool              `firestore:"processing"`
 }
 
 type DefaultMarshaler struct{}

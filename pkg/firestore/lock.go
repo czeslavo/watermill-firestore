@@ -7,6 +7,7 @@ import (
 	"github.com/pkg/errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"time"
 )
 
 type MessageLocker struct {
@@ -18,28 +19,22 @@ func NewMessageLocker(client *firestore.Client) *MessageLocker {
 }
 
 func (l *MessageLocker) Lock(ctx context.Context, key string) (func(ctx context.Context) error, error) {
-	transactionErr := l.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
-		_, err := tx.Get(l.lockDoc(key))
-		if err != nil && status.Code(err) != codes.NotFound {
-			fmt.Println("could not check if lock exists")
-			return errors.Wrap(err, "could not check if lock exists")
-		}
+	start := time.Now()
+	_, err := l.lockDoc(key).Get(ctx)
+	if err != nil && status.Code(err) != codes.NotFound {
+		return nil, errors.Wrap(err, "could not acquire lock")
+	}
+	if err == nil {
+		return nil, errors.New("lock already acquired")
+	}
 
-		err = tx.Create(l.lockDoc(key), struct{}{})
-		if err != nil {
-			fmt.Println("could not acquire lock")
-			return errors.Wrap(err, "could not acquire lock")
-		}
-
-		return nil
-	}, firestore.MaxAttempts(1))
-	if transactionErr != nil {
-		fmt.Printf("could not acquire lock: transaction, %s\n", transactionErr)
-		return nil, errors.Wrap(transactionErr, "could not acquire lock")
+	_, err = l.lockDoc(key).Create(ctx, struct{}{})
+	if err != nil {
+		return nil, errors.Wrap(err, "lock probably has been created in the meantime")
 	}
 
 	// lock acquired
-	fmt.Println("lock acquired")
+	fmt.Printf("lock acquired in %s\n", time.Now().Sub(start))
 
 	return func(ctx context.Context) error {
 		return l.Unlock(ctx, key)

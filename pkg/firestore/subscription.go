@@ -1,9 +1,8 @@
 package firestore
 
 import (
-	"context"
-
 	"cloud.google.com/go/firestore"
+	"context"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -18,6 +17,7 @@ type subscription struct {
 	config SubscriberConfig
 
 	client *firestore.Client
+	locker *MessageLocker
 	logger watermill.LoggerAdapter
 
 	closing chan struct{}
@@ -30,6 +30,7 @@ func newSubscription(name, topic string, config SubscriberConfig, client *firest
 		topic:   topic,
 		config:  config,
 		client:  client,
+		locker:  NewMessageLocker(client),
 		logger:  logger,
 		closing: closing,
 		output:  make(chan *message.Message),
@@ -101,7 +102,6 @@ func onlyAddedMessages(changes []firestore.DocumentChange) (added []firestore.Do
 
 func (s *subscription) handleAddedMessage(ctx context.Context, doc *firestore.DocumentSnapshot) {
 	logger := s.logger.With(watermill.LogFields{"document_id": doc.Ref.ID})
-
 	msg, err := s.config.Marshaler.Unmarshal(doc)
 	if err != nil {
 		logger.Error("Couldn't unmarshal message", err, nil)
@@ -112,7 +112,26 @@ func (s *subscription) handleAddedMessage(ctx context.Context, doc *firestore.Do
 	msg.SetContext(ctx)
 	defer cancelCtx()
 
-	// lock message processing
+	_, err = doc.Ref.Update(ctx, []firestore.Update{
+		{
+			Path:  "processing",
+			Value: true,
+		},
+	}, firestore.LastUpdateTime(doc.UpdateTime))
+	if err != nil {
+		// someone has changed it in the meantime
+		return
+	}
+
+	//s.client.Getdoc.ReadTime
+	//// lock message processing
+	//unlock, err := s.locker.Lock(ctx, msg.UUID)
+	//if err != nil {
+	//	// we don't handle it
+	//	return
+	//}
+	//defer unlock(ctx)
+
 	select {
 	case <-s.closing:
 		logger.Trace("Channel closed when waiting for consuming message", nil)
@@ -124,8 +143,6 @@ func (s *subscription) handleAddedMessage(ctx context.Context, doc *firestore.Do
 		logger.Trace("Message consumed, waiting for ack/nack", nil)
 		// message consumed, wait for ack/nack
 	}
-
-	// message is processed right now, lock it
 
 	select {
 	case <-s.closing:
