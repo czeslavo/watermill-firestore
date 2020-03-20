@@ -2,9 +2,10 @@ package firestore
 
 import (
 	"context"
-	"github.com/pkg/errors"
 	"sync"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"cloud.google.com/go/firestore"
 	"github.com/ThreeDotsLabs/watermill"
@@ -164,7 +165,6 @@ func (p *Publisher) PublishInTransaction(topic string, t *firestore.Transaction,
 			})
 
 			logger.Trace("Added message to transaction", nil)
-			continue
 		}
 	}
 
@@ -277,7 +277,6 @@ func (p *Publisher) publishInBatches(
 			logger.Error("Failed to commit messages batch", err, nil)
 			return err
 		}
-		logger.Trace("Published message", nil)
 	}
 
 	return nil
