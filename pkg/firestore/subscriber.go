@@ -3,6 +3,7 @@ package firestore
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"time"
 
@@ -23,20 +24,18 @@ const (
 
 type SubscriberConfig struct {
 	// ProjectID is an ID of a Google Cloud project with Firestore database.
+	// It defaults to os.Getenv("FIRESTORE_PROJECT_ID").
 	ProjectID string
 
 	// GenerateSubscriptionName should accept topic name and construct a subscription name basing on it.
-	//
 	// It defaults to topic -> topic + "_sub".
 	GenerateSubscriptionName GenerateSubscriptionNameFn
 
 	// PubSubRootCollection is a name of a collection which will be used as a root collection for the PubSub.
-	//
 	// It defaults to "pubsub".
 	PubSubRootCollection string
 
 	// Timeout is used for single Firestore operations.
-	//
 	// It defaults to 30 seconds.
 	Timeout time.Duration
 
@@ -48,6 +47,9 @@ type SubscriberConfig struct {
 }
 
 func (c *SubscriberConfig) setDefaults() {
+	if c.ProjectID == "" {
+		c.ProjectID = os.Getenv("FIRESTORE_PROJECT_ID")
+	}
 	if c.PubSubRootCollection == "" {
 		c.PubSubRootCollection = defaultPubSubRootCollection
 	}

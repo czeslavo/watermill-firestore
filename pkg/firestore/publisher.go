@@ -2,9 +2,11 @@ package firestore
 
 import (
 	"context"
-	"github.com/pkg/errors"
+	"os"
 	"sync"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"cloud.google.com/go/firestore"
 	"github.com/ThreeDotsLabs/watermill"
@@ -16,6 +18,7 @@ import (
 
 type PublisherConfig struct {
 	// ProjectID is an ID of a Google Cloud project with Firestore database.
+	// It defaults to os.Getenv("FIRESTORE_PROJECT_ID").
 	ProjectID string
 
 	// PubSubRootCollection is a name of a collection which will be used as a root collection for the PubSub.
@@ -47,6 +50,9 @@ type PublisherConfig struct {
 }
 
 func (c *PublisherConfig) setDefaults() {
+	if c.ProjectID == "" {
+		c.ProjectID = os.Getenv("FIRESTORE_PROJECT_ID")
+	}
 	if c.MessagePublishTimeout == 0 {
 		c.MessagePublishTimeout = time.Minute
 	}
