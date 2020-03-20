@@ -23,3 +23,7 @@ func NewTransactionalPublisher(config PublisherConfig, tx *firestore.Transaction
 func (p *TransactionalPublisher) Publish(topic string, messages ...*message.Message) error {
 	return p.publisher.PublishInTransaction(topic, p.tx, messages...)
 }
+
+func (p *TransactionalPublisher) Close() error {
+	return p.publisher.Close()
+}
