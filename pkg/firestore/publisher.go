@@ -6,11 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
-
 	"cloud.google.com/go/firestore"
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/pkg/errors"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -170,7 +169,6 @@ func (p *Publisher) PublishInTransaction(topic string, t *firestore.Transaction,
 			})
 
 			logger.Trace("Added message to transaction", nil)
-			continue
 		}
 	}
 
@@ -283,7 +281,6 @@ func (p *Publisher) publishInBatches(
 			logger.Error("Failed to commit messages batch", err, nil)
 			return err
 		}
-		logger.Trace("Published message", nil)
 	}
 
 	return nil
