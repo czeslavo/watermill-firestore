@@ -1,8 +1,9 @@
 package firestore
 
 import (
-	"cloud.google.com/go/firestore"
 	"context"
+
+	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -112,25 +113,24 @@ func (s *subscription) handleAddedMessage(ctx context.Context, doc *firestore.Do
 	msg.SetContext(ctx)
 	defer cancelCtx()
 
-	_, err = doc.Ref.Update(ctx, []firestore.Update{
-		{
-			Path:  "processing",
-			Value: true,
-		},
-	}, firestore.LastUpdateTime(doc.UpdateTime))
-	if err != nil {
-		// someone has changed it in the meantime
-		return
-	}
-
-	//s.client.Getdoc.ReadTime
-	//// lock message processing
-	//unlock, err := s.locker.Lock(ctx, msg.UUID)
+	//locked, err := s.locker.Lock(ctx, msg.UUID)
 	//if err != nil {
-	//	// we don't handle it
+	//	logger.Trace("Message lock couldn't be acquired", watermill.LogFields{"err": err})
 	//	return
 	//}
-	//defer unlock(ctx)
+	//if !locked {
+	//	logger.Trace("Message lock was already acquired", nil)
+	//	return
+	//}
+	//
+	//wasAcked := false
+	//defer func() {
+	//	if !wasAcked {
+	//		if err := s.locker.Unlock(ctx, msg.UUID); err != nil {
+	//			logger.Error("Could not unlock message when not acked", err, nil)
+	//		}
+	//	}
+	//}()
 
 	select {
 	case <-s.closing:
@@ -156,6 +156,7 @@ func (s *subscription) handleAddedMessage(ctx context.Context, doc *firestore.Do
 			logger.Error("Failed to ack message", err, nil)
 			return
 		}
+		//wasAcked = true
 		logger.Trace("Message acked", nil)
 	}
 }

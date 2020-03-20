@@ -1,12 +1,15 @@
 package firestore_test
 
 import (
-	"cloud.google.com/go/firestore"
 	"context"
-	"github.com/google/uuid"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/ThreeDotsLabs/watermill"
+
+	"cloud.google.com/go/firestore"
+	"github.com/google/uuid"
 
 	watermillFirestore "github.com/czeslavo/watermill-firestore/pkg/firestore"
 	"github.com/stretchr/testify/require"
@@ -18,25 +21,26 @@ func TestLock(t *testing.T) {
 
 	locker := watermillFirestore.NewMessageLocker(client)
 
-	docPath := "first_to_lock"
+	docPath := watermill.NewULID()
 	ctx := context.Background()
 
 	// first consumer tries to acquire lock successfully
-	unlock, err := locker.Lock(ctx, docPath)
+	locked, err := locker.Lock(ctx, docPath)
 	require.NoError(t, err)
-	defer unlock(ctx)
+	require.True(t, locked)
 
 	// second consumer fails to acquire lock
-	_, err = locker.Lock(ctx, docPath)
-	require.Error(t, err)
+	locked, err = locker.Lock(ctx, docPath)
+	require.NoError(t, err)
+	require.False(t, locked)
 
 	// first consumer unlocks
-	unlock(ctx)
+	locker.Unlock(ctx, docPath)
 
 	// lock is acquirable again
-	unlock, err = locker.Lock(ctx, docPath)
+	locked, err = locker.Lock(ctx, docPath)
 	require.NoError(t, err)
-	unlock(ctx)
+	require.True(t, locked)
 }
 
 func generateUUIDs(n int) []string {

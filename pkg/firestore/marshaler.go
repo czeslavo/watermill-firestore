@@ -1,6 +1,8 @@
 package firestore
 
 import (
+	"time"
+
 	"cloud.google.com/go/firestore"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/pkg/errors"
@@ -15,7 +17,7 @@ type Message struct {
 	UUID       string            `firestore:"uuid"`
 	Metadata   map[string]string `firestore:"metadata"`
 	Payload    string            `firestore:"payload"`
-	Processing bool              `firestore:"processing"`
+	Processing time.Time         `firestore:"processing"`
 }
 
 type DefaultMarshaler struct{}
