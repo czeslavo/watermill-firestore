@@ -45,6 +45,9 @@ type PublisherConfig struct {
 
 	// Marshaler marshals message from Watermill to Firestore format and vice versa.
 	Marshaler Marshaler
+
+	// CustomFirestoreClient can be used to override a default client.
+	CustomFirestoreClient *firestore.Client
 }
 
 func (c *PublisherConfig) setDefaults() {
@@ -80,9 +83,15 @@ type subscriptionsCacheEntry struct {
 func NewPublisher(config PublisherConfig, logger watermill.LoggerAdapter) (*Publisher, error) {
 	config.setDefaults()
 
-	client, err := firestore.NewClient(context.Background(), config.ProjectID, config.GoogleClientOpts...)
-	if err != nil {
-		return nil, err
+	var client *firestore.Client
+	if config.CustomFirestoreClient != nil {
+		client = config.CustomFirestoreClient
+	} else {
+		var err error
+		client, err = firestore.NewClient(context.Background(), config.ProjectID, config.GoogleClientOpts...)
+		if err != nil {
+			return nil, errors.Wrap(err, "cannot create default firestore client")
+		}
 	}
 
 	return &Publisher{

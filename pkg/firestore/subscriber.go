@@ -2,13 +2,13 @@ package firestore
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/pkg/errors"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -45,6 +45,9 @@ type SubscriberConfig struct {
 
 	// Marshaler marshals message from Watermill to Firestore format and vice versa.
 	Marshaler Marshaler
+
+	// CustomFirestoreClient can be used to override a default client.
+	CustomFirestoreClient *firestore.Client
 }
 
 func (c *SubscriberConfig) setDefaults() {
@@ -84,9 +87,15 @@ type Subscriber struct {
 func NewSubscriber(config SubscriberConfig, logger watermill.LoggerAdapter) (*Subscriber, error) {
 	config.setDefaults()
 
-	client, err := firestore.NewClient(context.Background(), config.ProjectID, config.GoogleClientOpts...)
-	if err != nil {
-		return nil, err
+	var client *firestore.Client
+	if config.CustomFirestoreClient != nil {
+		client = config.CustomFirestoreClient
+	} else {
+		var err error
+		client, err = firestore.NewClient(context.Background(), config.ProjectID, config.GoogleClientOpts...)
+		if err != nil {
+			return nil, errors.Wrap(err, "cannot create default firestore client")
+		}
 	}
 
 	return &Subscriber{
