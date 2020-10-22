@@ -111,7 +111,7 @@ func TestIntrospectionClient(t *testing.T) {
 
 		messages, err = inspectorClient.GetSubscriptionMessages(ctx, topic, subscription)
 		require.NoError(t, err)
-		require.Len(t, messages, 0, "after acking there should be no messages left")
+		require.Len(t, messages, 0, "after acking there should be no message left")
 	})
 
 	t.Run("PurgeSubscription", func(t *testing.T) {
@@ -140,7 +140,7 @@ func TestIntrospectionClient(t *testing.T) {
 
 		messages, err = inspectorClient.GetSubscriptionMessages(ctx, topic, subscription)
 		require.NoError(t, err)
-		require.Len(t, messages, 0, "after purging there should be no messages left")
+		require.Len(t, messages, 0, "after purging there should be no message left")
 	})
 }
 
@@ -182,7 +182,7 @@ func getSubscriberWithUniqueSubscriptions(t *testing.T, firestoreClient *firesto
 	})
 }
 
-// Each call to `Subscribe` will create the same subscription.
+// Each call to `Subscribe` will try to create the same subscription.
 func getSubscriberWithFixedSubscription(t *testing.T, firestoreClient *firestore.Client, logger watermill.LoggerAdapter) message.Subscriber {
 	return getSubscriber(t, firestoreClient, logger, func(topic string) string {
 		return fmt.Sprintf("%s_sub", topic)

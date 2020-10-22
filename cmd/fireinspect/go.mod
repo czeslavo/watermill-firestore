@@ -1,4 +1,4 @@
-module github.com/czeslavo/watermill-firestore/cmd/inspector
+module github.com/czeslavo/watermill-firestore/cmd/fireinspect
 
 go 1.14
 
