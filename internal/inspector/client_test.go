@@ -1,4 +1,4 @@
-package introspection_test
+package inspector_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"cloud.google.com/go/firestore"
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/czeslavo/watermill-firestore/internal/introspection"
+	"github.com/czeslavo/watermill-firestore/internal/inspector"
 	watermillFirestore "github.com/czeslavo/watermill-firestore/pkg/firestore"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -27,7 +27,7 @@ func TestIntrospectionClient(t *testing.T) {
 
 	firestoreClient := getFirestoreClient(t, ctx)
 	subscriber := getSubscriberWithUniqueSubscriptions(t, firestoreClient, logger)
-	introClient := getIntrospectionClient(t, firestoreClient)
+	inspectorClient := getInspectorClient(t, firestoreClient)
 
 	t.Run("GetTopics", func(t *testing.T) {
 		t.Parallel()
@@ -37,7 +37,7 @@ func TestIntrospectionClient(t *testing.T) {
 			triggerSubscriptionCreating(t, ctx, subscriber, topic)
 		}
 
-		topicsFromClient, err := introClient.GetTopics(ctx)
+		topicsFromClient, err := inspectorClient.GetTopics(ctx)
 		require.NoError(t, err)
 
 		for _, topic := range topics {
@@ -55,13 +55,13 @@ func TestIntrospectionClient(t *testing.T) {
 			triggerSubscriptionCreating(t, ctx, subscriber, topic)
 		}
 
-		subscriptions, err := introClient.GetTopicSubscriptions(ctx, topic)
+		subscriptions, err := inspectorClient.GetTopicSubscriptions(ctx, topic)
 		require.NoError(t, err)
 
 		assert.Len(t, subscriptions, subscriptionsCount)
 	})
 
-	t.Run("PollSubscriptionMessages", func(t *testing.T) {
+	t.Run("GetSubscriptionMessages", func(t *testing.T) {
 		t.Parallel()
 
 		topic := uuid.New().String()
@@ -70,7 +70,7 @@ func TestIntrospectionClient(t *testing.T) {
 		publisher := getPublisher(t, firestoreClient, logger)
 
 		triggerSubscriptionCreating(t, ctx, subscriber, topic)
-		subscriptions, err := introClient.GetTopicSubscriptions(ctx, topic)
+		subscriptions, err := inspectorClient.GetTopicSubscriptions(ctx, topic)
 		require.NoError(t, err)
 		require.Len(t, subscriptions, 1)
 		subscription := subscriptions[0]
@@ -78,7 +78,7 @@ func TestIntrospectionClient(t *testing.T) {
 		err = publisher.Publish(topic, someRandomMessage(t), someRandomMessage(t))
 		require.NoError(t, err)
 
-		messages, err := introClient.PollSubscriptionMessages(ctx, topic, subscription)
+		messages, err := inspectorClient.GetSubscriptionMessages(ctx, topic, subscription)
 		require.NoError(t, err)
 
 		assert.Len(t, messages, 2)
@@ -93,7 +93,7 @@ func TestIntrospectionClient(t *testing.T) {
 		publisher := getPublisher(t, firestoreClient, logger)
 
 		triggerSubscriptionCreating(t, ctx, subscriber, topic)
-		subscriptions, err := introClient.GetTopicSubscriptions(ctx, topic)
+		subscriptions, err := inspectorClient.GetTopicSubscriptions(ctx, topic)
 		require.NoError(t, err)
 		require.Len(t, subscriptions, 1)
 		subscription := subscriptions[0]
@@ -101,15 +101,15 @@ func TestIntrospectionClient(t *testing.T) {
 		err = publisher.Publish(topic, someRandomMessage(t))
 		require.NoError(t, err)
 
-		messages, err := introClient.PollSubscriptionMessages(ctx, topic, subscription)
+		messages, err := inspectorClient.GetSubscriptionMessages(ctx, topic, subscription)
 		require.NoError(t, err)
 		require.Len(t, messages, 1)
 		msg := messages[0]
 
-		err = introClient.AckMessage(ctx, topic, subscription, msg.UUID)
+		err = inspectorClient.AckMessage(ctx, topic, subscription, msg.UUID)
 		require.NoError(t, err)
 
-		messages, err = introClient.PollSubscriptionMessages(ctx, topic, subscription)
+		messages, err = inspectorClient.GetSubscriptionMessages(ctx, topic, subscription)
 		require.NoError(t, err)
 		require.Len(t, messages, 0, "after acking there should be no messages left")
 	})
@@ -123,7 +123,7 @@ func TestIntrospectionClient(t *testing.T) {
 		publisher := getPublisher(t, firestoreClient, logger)
 
 		triggerSubscriptionCreating(t, ctx, subscriber, topic)
-		subscriptions, err := introClient.GetTopicSubscriptions(ctx, topic)
+		subscriptions, err := inspectorClient.GetTopicSubscriptions(ctx, topic)
 		require.NoError(t, err)
 		require.Len(t, subscriptions, 1)
 		subscription := subscriptions[0]
@@ -131,14 +131,14 @@ func TestIntrospectionClient(t *testing.T) {
 		err = publisher.Publish(topic, someRandomMessage(t), someRandomMessage(t))
 		require.NoError(t, err)
 
-		messages, err := introClient.PollSubscriptionMessages(ctx, topic, subscription)
+		messages, err := inspectorClient.GetSubscriptionMessages(ctx, topic, subscription)
 		require.NoError(t, err)
 		require.Len(t, messages, 2)
 
-		err = introClient.PurgeSubscription(ctx, topic, subscription)
+		err = inspectorClient.PurgeSubscription(ctx, topic, subscription)
 		require.NoError(t, err)
 
-		messages, err = introClient.PollSubscriptionMessages(ctx, topic, subscription)
+		messages, err = inspectorClient.GetSubscriptionMessages(ctx, topic, subscription)
 		require.NoError(t, err)
 		require.Len(t, messages, 0, "after purging there should be no messages left")
 	})
@@ -189,8 +189,8 @@ func getSubscriberWithFixedSubscription(t *testing.T, firestoreClient *firestore
 	})
 }
 
-func getIntrospectionClient(t *testing.T, firestoreClient *firestore.Client) *introspection.Client {
-	introClient, err := introspection.NewClient(firestoreClient, pubSubRootCollection)
+func getInspectorClient(t *testing.T, firestoreClient *firestore.Client) *inspector.Client {
+	introClient, err := inspector.NewClient(firestoreClient, pubSubRootCollection)
 	require.NoError(t, err)
 	return introClient
 }

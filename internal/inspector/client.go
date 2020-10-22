@@ -1,4 +1,4 @@
-package introspection
+package inspector
 
 import (
 	"context"
@@ -57,7 +57,7 @@ func (c *Client) GetTopicSubscriptions(ctx context.Context, topic string) ([]str
 	return subscriptions, nil
 }
 
-func (c *Client) PollSubscriptionMessages(ctx context.Context, topic, subscription string) (message.Messages, error) {
+func (c *Client) GetSubscriptionMessages(ctx context.Context, topic, subscription string) (message.Messages, error) {
 	docs, err := c.rootCollection().Doc(topic).Collection(subscription).Documents(ctx).GetAll()
 	if err != nil {
 		return nil, errors.Wrap(err, "could not get messages documents")
