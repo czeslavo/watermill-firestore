@@ -201,7 +201,16 @@ func createFirestoreSubscriptionIfNotExists(client *firestore.Client, rootCollec
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	_, err := client.Collection(rootCollection).Doc(topic).Collection(subscriptionsCollection).Doc(subscription).Create(ctx, struct{}{})
+	topicDoc := client.Collection(rootCollection).Doc(topic)
+	_, err := topicDoc.Create(ctx, struct{}{})
+	if status.Code(err) == codes.AlreadyExists {
+		logger.Trace("Topic already exists", nil)
+	} else if err != nil {
+		logger.Error("Couldn't create topic", err, nil)
+		return err
+	}
+
+	_, err = topicDoc.Collection(subscriptionsCollection).Doc(subscription).Create(ctx, struct{}{})
 	if status.Code(err) == codes.AlreadyExists {
 		logger.Trace("Subscription already exists", nil)
 		return nil

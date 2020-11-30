@@ -4,8 +4,7 @@
 version: '3'
 services:
   firestore:
-    build:
-      context: ./emulator
+    image: karhoo/firestore-emulator:0.2.1
     env_file:
       - "./.env"
     ports:
